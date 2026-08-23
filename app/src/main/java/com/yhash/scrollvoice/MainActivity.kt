@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.text.TextUtils
@@ -44,12 +43,13 @@ class MainActivity : AppCompatActivity() {
         modeGroup = findViewById(R.id.modeGroup)
 
         val savedMode = prefs.getString("mode", VoiceListenerService.MODE_VOICE)
-        if (savedMode == VoiceListenerService.MODE_CLAP) {
-            findViewById<android.widget.RadioButton>(R.id.modeClap).isChecked = true
+        when (savedMode) {
+            VoiceListenerService.MODE_CLAP -> findViewById<android.widget.RadioButton>(R.id.modeClap).isChecked = true
+            VoiceListenerService.MODE_MOTION -> findViewById<android.widget.RadioButton>(R.id.modeMotion).isChecked = true
         }
 
         modeGroup.setOnCheckedChangeListener { _, checkedId ->
-            val mode = if (checkedId == R.id.modeClap) VoiceListenerService.MODE_CLAP else VoiceListenerService.MODE_VOICE
+            val mode = modeForCheckedId(checkedId)
             prefs.edit().putString("mode", mode).apply()
             if (toggleSwitch.isChecked) {
                 startVoiceService(mode)
@@ -67,6 +67,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun modeForCheckedId(checkedId: Int): String = when (checkedId) {
+        R.id.modeClap -> VoiceListenerService.MODE_CLAP
+        R.id.modeMotion -> VoiceListenerService.MODE_MOTION
+        else -> VoiceListenerService.MODE_VOICE
+    }
+
     override fun onResume() {
         super.onResume()
         if (toggleSwitch.isChecked && !isAccessibilityServiceEnabled()) {
@@ -75,7 +81,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startFlow() {
-        if (!hasRecordAudioPermission()) {
+        val mode = prefs.getString("mode", VoiceListenerService.MODE_VOICE) ?: VoiceListenerService.MODE_VOICE
+        // Motion mode needs no microphone at all.
+        if (mode != VoiceListenerService.MODE_MOTION && !hasRecordAudioPermission()) {
             requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             return
         }
@@ -113,7 +121,11 @@ class MainActivity : AppCompatActivity() {
         }
         val mode = prefs.getString("mode", VoiceListenerService.MODE_VOICE) ?: VoiceListenerService.MODE_VOICE
         startVoiceService(mode)
-        val modeLabel = if (mode == VoiceListenerService.MODE_CLAP) "clap" else "voice"
+        val modeLabel = when (mode) {
+            VoiceListenerService.MODE_CLAP -> "clap"
+            VoiceListenerService.MODE_MOTION -> "motion"
+            else -> "voice"
+        }
         statusText.text = "Voice control is ON ($modeLabel mode)"
     }
 
