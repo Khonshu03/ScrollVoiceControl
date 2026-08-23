@@ -28,6 +28,7 @@ class VoiceListenerService : Service() {
         const val MODE_VOICE = "voice"
         const val MODE_CLAP = "clap"
         const val MODE_MOTION = "motion"
+        const val MODE_CAMERA = "camera"
 
         private val COMMANDS = mapOf(
             "down" to "down",
@@ -41,6 +42,7 @@ class VoiceListenerService : Service() {
     private var speechRecognizer: SpeechRecognizer? = null
     private var clapDetector: ClapDetector? = null
     private var motionDetector: MotionDetector? = null
+    private var cameraGestureDetector: CameraGestureDetector? = null
     private val handler = Handler(Looper.getMainLooper())
     private var isRunning = false
     private var mode = MODE_VOICE
@@ -67,6 +69,7 @@ class VoiceListenerService : Service() {
                     startClapDetection()
                 }
                 MODE_MOTION -> startMotionDetection()
+                MODE_CAMERA -> startCameraGestureDetection()
                 else -> {
                     requestDucking()
                     startListening()
@@ -84,6 +87,8 @@ class VoiceListenerService : Service() {
         clapDetector = null
         motionDetector?.stop()
         motionDetector = null
+        cameraGestureDetector?.stop()
+        cameraGestureDetector = null
         abandonDucking()
         stopOverlay()
         super.onDestroy()
@@ -154,6 +159,15 @@ class VoiceListenerService : Service() {
             OverlayService.instance?.pulse()
         }
         motionDetector?.start()
+    }
+
+    private fun startCameraGestureDetection() {
+        cameraGestureDetector = CameraGestureDetector(this) { direction ->
+            Log.d(TAG, "Camera swipe -> $direction")
+            ScrollAccessibilityService.instance?.performScroll(direction)
+            OverlayService.instance?.pulse()
+        }
+        cameraGestureDetector?.start()
     }
 
     private fun startListening() {
@@ -237,11 +251,18 @@ class VoiceListenerService : Service() {
         }
     }
 
-    private fun buildNotification() =
-        NotificationCompat.Builder(this, CHANNEL_ID)
+    private fun buildNotification(): android.app.Notification {
+        val text = when (mode) {
+            MODE_CLAP -> "Listening for claps"
+            MODE_MOTION -> "Watching for phone tilt"
+            MODE_CAMERA -> "Watching camera for hand swipes"
+            else -> getString(R.string.notification_text_listening)
+        }
+        return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.app_name))
-            .setContentText(getString(R.string.notification_text_listening))
+            .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setOngoing(true)
             .build()
+    }
 }
