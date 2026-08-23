@@ -18,7 +18,7 @@
         android:id="@+id/modeGroup"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
+        android:orientation="vertical"
         android:layout_marginBottom="16dp">
 
         <RadioButton
@@ -26,21 +26,25 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Voice"
-            android:checked="true"
-            android:layout_marginEnd="24dp" />
+            android:checked="true" />
 
         <RadioButton
             android:id="@+id/modeClap"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Clap"
-            android:layout_marginEnd="24dp" />
+            android:text="Clap" />
 
         <RadioButton
             android:id="@+id/modeMotion"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Motion" />
+            android:text="Motion (tilt phone)" />
+
+        <RadioButton
+            android:id="@+id/modeCamera"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Camera (hand swipe)" />
 
     </RadioGroup>
 
