@@ -27,6 +27,7 @@ class VoiceListenerService : Service() {
         const val EXTRA_MODE = "mode"
         const val MODE_VOICE = "voice"
         const val MODE_CLAP = "clap"
+        const val MODE_MOTION = "motion"
 
         private val COMMANDS = mapOf(
             "down" to "down",
@@ -39,9 +40,11 @@ class VoiceListenerService : Service() {
 
     private var speechRecognizer: SpeechRecognizer? = null
     private var clapDetector: ClapDetector? = null
+    private var motionDetector: MotionDetector? = null
     private val handler = Handler(Looper.getMainLooper())
     private var isRunning = false
     private var mode = MODE_VOICE
+    private var lastCommandTime = 0L
 
     private var audioManager: AudioManager? = null
     private var audioFocusRequest: AudioFocusRequest? = null
@@ -58,11 +61,16 @@ class VoiceListenerService : Service() {
         startOverlay()
         if (!isRunning) {
             isRunning = true
-            requestDucking()
-            if (mode == MODE_CLAP) {
-                startClapDetection()
-            } else {
-                startListening()
+            when (mode) {
+                MODE_CLAP -> {
+                    requestDucking()
+                    startClapDetection()
+                }
+                MODE_MOTION -> startMotionDetection()
+                else -> {
+                    requestDucking()
+                    startListening()
+                }
             }
         }
         return START_STICKY
@@ -74,6 +82,8 @@ class VoiceListenerService : Service() {
         speechRecognizer = null
         clapDetector?.stop()
         clapDetector = null
+        motionDetector?.stop()
+        motionDetector = null
         abandonDucking()
         stopOverlay()
         super.onDestroy()
@@ -137,6 +147,15 @@ class VoiceListenerService : Service() {
         clapDetector?.start()
     }
 
+    private fun startMotionDetection() {
+        motionDetector = MotionDetector(this) { direction ->
+            Log.d(TAG, "Motion tilt -> $direction")
+            ScrollAccessibilityService.instance?.performScroll(direction)
+            OverlayService.instance?.pulse()
+        }
+        motionDetector?.start()
+    }
+
     private fun startListening() {
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             Log.e(TAG, "Speech recognition not available on this device")
@@ -150,6 +169,13 @@ class VoiceListenerService : Service() {
                     restartListening()
                 }
 
+                override fun onPartialResults(partialResults: Bundle?) {
+                    // React to partial (in-progress) results too, so a
+                    // command fires as soon as it's heard rather than
+                    // waiting for the recognizer to decide speech ended.
+                    handleResults(partialResults)
+                }
+
                 override fun onError(error: Int) {
                     restartListening()
                 }
@@ -159,7 +185,6 @@ class VoiceListenerService : Service() {
                 override fun onRmsChanged(rmsdB: Float) {}
                 override fun onBufferReceived(buffer: ByteArray?) {}
                 override fun onEndOfSpeech() {}
-                override fun onPartialResults(partialResults: Bundle?) {}
                 override fun onEvent(eventType: Int, params: Bundle?) {}
             })
         }
@@ -170,7 +195,7 @@ class VoiceListenerService : Service() {
         if (!isRunning) return
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
         }
         speechRecognizer?.startListening(intent)
@@ -183,11 +208,15 @@ class VoiceListenerService : Service() {
 
     private fun handleResults(results: Bundle?) {
         val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: return
+        val now = System.currentTimeMillis()
+        if (now - lastCommandTime < 1200) return // debounce partial + final firing twice
+
         for (phrase in matches) {
             val lower = phrase.lowercase()
             for ((keyword, direction) in COMMANDS) {
                 if (lower.contains(keyword)) {
                     Log.d(TAG, "Command recognized: '$phrase' -> $direction")
+                    lastCommandTime = now
                     ScrollAccessibilityService.instance?.performScroll(direction)
                     OverlayService.instance?.pulse()
                     return
