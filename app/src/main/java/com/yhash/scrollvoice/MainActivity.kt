@@ -29,7 +29,9 @@ class MainActivity : AppCompatActivity() {
         if (granted) {
             checkOverlayThenAccessibility()
         } else {
-            Toast.makeText(this, "Microphone permission is required", Toast.LENGTH_SHORT).show()
+            val mode = prefs.getString("mode", VoiceListenerService.MODE_VOICE)
+            val permissionName = if (mode == VoiceListenerService.MODE_CAMERA) "Camera" else "Microphone"
+            Toast.makeText(this, "$permissionName permission is required", Toast.LENGTH_SHORT).show()
             toggleSwitch.isChecked = false
         }
     }
@@ -46,6 +48,7 @@ class MainActivity : AppCompatActivity() {
         when (savedMode) {
             VoiceListenerService.MODE_CLAP -> findViewById<android.widget.RadioButton>(R.id.modeClap).isChecked = true
             VoiceListenerService.MODE_MOTION -> findViewById<android.widget.RadioButton>(R.id.modeMotion).isChecked = true
+            VoiceListenerService.MODE_CAMERA -> findViewById<android.widget.RadioButton>(R.id.modeCamera).isChecked = true
         }
 
         modeGroup.setOnCheckedChangeListener { _, checkedId ->
@@ -70,6 +73,7 @@ class MainActivity : AppCompatActivity() {
     private fun modeForCheckedId(checkedId: Int): String = when (checkedId) {
         R.id.modeClap -> VoiceListenerService.MODE_CLAP
         R.id.modeMotion -> VoiceListenerService.MODE_MOTION
+        R.id.modeCamera -> VoiceListenerService.MODE_CAMERA
         else -> VoiceListenerService.MODE_VOICE
     }
 
@@ -82,12 +86,23 @@ class MainActivity : AppCompatActivity() {
 
     private fun startFlow() {
         val mode = prefs.getString("mode", VoiceListenerService.MODE_VOICE) ?: VoiceListenerService.MODE_VOICE
-        // Motion mode needs no microphone at all.
-        if (mode != VoiceListenerService.MODE_MOTION && !hasRecordAudioPermission()) {
-            requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            return
+        when (mode) {
+            VoiceListenerService.MODE_MOTION -> checkOverlayThenAccessibility() // needs neither mic nor camera
+            VoiceListenerService.MODE_CAMERA -> {
+                if (hasCameraPermission()) {
+                    checkOverlayThenAccessibility()
+                } else {
+                    requestPermissionLauncher.launch(Manifest.permission.CAMERA)
+                }
+            }
+            else -> {
+                if (hasRecordAudioPermission()) {
+                    checkOverlayThenAccessibility()
+                } else {
+                    requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
+            }
         }
-        checkOverlayThenAccessibility()
     }
 
     private fun checkOverlayThenAccessibility() {
@@ -124,6 +139,7 @@ class MainActivity : AppCompatActivity() {
         val modeLabel = when (mode) {
             VoiceListenerService.MODE_CLAP -> "clap"
             VoiceListenerService.MODE_MOTION -> "motion"
+            VoiceListenerService.MODE_CAMERA -> "camera"
             else -> "voice"
         }
         statusText.text = "Voice control is ON ($modeLabel mode)"
@@ -140,6 +156,12 @@ class MainActivity : AppCompatActivity() {
         ActivityCompat.checkSelfPermission(
             this,
             Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+
+    private fun hasCameraPermission(): Boolean =
+        ActivityCompat.checkSelfPermission(
+            this,
+            Manifest.permission.CAMERA
         ) == PackageManager.PERMISSION_GRANTED
 
     private fun isAccessibilityServiceEnabled(): Boolean {
