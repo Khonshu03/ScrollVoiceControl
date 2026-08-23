@@ -26,6 +26,6 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="24dp"
         android:gravity="center"
-        android:text="Say \"down\" to scroll to next reel,\n\"up\" to go back a reel,\n\"back\" to leave the app." />
+        android:text="@string/hint_text" />
 
 </LinearLayout>
