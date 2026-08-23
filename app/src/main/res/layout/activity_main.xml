@@ -33,7 +33,14 @@
             android:id="@+id/modeClap"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Clap" />
+            android:text="Clap"
+            android:layout_marginEnd="24dp" />
+
+        <RadioButton
+            android:id="@+id/modeMotion"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Motion" />
 
     </RadioGroup>
 
