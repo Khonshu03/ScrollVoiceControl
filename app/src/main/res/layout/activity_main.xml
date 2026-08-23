@@ -14,6 +14,29 @@
         android:textSize="18sp"
         android:layout_marginBottom="24dp" />
 
+    <RadioGroup
+        android:id="@+id/modeGroup"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="16dp">
+
+        <RadioButton
+            android:id="@+id/modeVoice"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Voice"
+            android:checked="true"
+            android:layout_marginEnd="24dp" />
+
+        <RadioButton
+            android:id="@+id/modeClap"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Clap" />
+
+    </RadioGroup>
+
     <com.google.android.material.switchmaterial.SwitchMaterial
         android:id="@+id/toggleSwitch"
         android:layout_width="wrap_content"
@@ -26,6 +49,6 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="24dp"
         android:gravity="center"
-        android:text="Say \"down\" to scroll to next reel,\n\"up\" to go back a reel,\n\"back\" to leave the app." />
+        android:text="@string/hint_text" />
 
 </LinearLayout>
