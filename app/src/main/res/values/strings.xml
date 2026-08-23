@@ -3,5 +3,5 @@
     <string name="accessibility_service_description">Lets Scroll Voice Control swipe the screen up, down, or back when you say a voice command.</string>
     <string name="notification_channel_name">Voice Listener</string>
     <string name="notification_text_listening">Listening for down, up, back</string>
-    <string name="hint_text">Voice: say "down", "up", "back".\nClap: 1 clap = down, 2 = up, 3 = back.\nMotion: tilt phone forward = down, back = up.</string>
+    <string name="hint_text">Voice: say "down", "up", "back".\nClap: 1 clap = down, 2 = up, 3 = back.\nMotion: tilt phone forward = down, back = up.\nCamera: swipe hand up past the front camera = down, swipe down = up.</string>
 </resources>
