@@ -163,9 +163,9 @@ class CameraGestureDetector(
             while (col < width) {
                 val idx = rowStart + col * pixelStride
                 if (idx in 0 until capacity) {
-                    val luminance = buffer.get(idx).toInt() and 0xFF
-                    bandSum[band] += luminance
-                    bandCount[band]++
+                    val luminance = (buffer.get(idx).toInt() and 0xFF).toDouble()
+                    bandSum[band] = bandSum[band] + luminance
+                    bandCount[band] = bandCount[band] + 1
                 }
                 col += SAMPLE_STEP
             }
