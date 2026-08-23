@@ -2,6 +2,5 @@
     <string name="app_name">Scroll Voice Control</string>
     <string name="accessibility_service_description">Lets Scroll Voice Control swipe the screen up, down, or back when you say a voice command.</string>
     <string name="notification_channel_name">Voice Listener</string>
-    <string name="notification_text_listening">Listening for down, up, back</string>
-    <string name="hint_text">Say "down" to scroll to next reel,\n"up" to go back a reel,\n"back" to leave the app.</string>
+    <string name="notification_text_listening">Listening for \"down\", \"up\", \"back\"</string>
 </resources>
