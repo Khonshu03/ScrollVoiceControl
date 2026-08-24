@@ -15,7 +15,8 @@ import android.util.Log
  */
 class MotionDetector(
     context: Context,
-    private val onTilt: (direction: String) -> Unit
+    private val onTilt: (direction: String) -> Unit,
+    private val onError: (() -> Unit)? = null
 ) : SensorEventListener {
 
     companion object {
@@ -48,7 +49,10 @@ class MotionDetector(
     fun start() {
         accelerometer?.let {
             sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
-        } ?: Log.e(TAG, "No accelerometer available on this device")
+        } ?: run {
+            Log.e(TAG, "No accelerometer available on this device")
+            onError?.invoke()
+        }
     }
 
     fun stop() {

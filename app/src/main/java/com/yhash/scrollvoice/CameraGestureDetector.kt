@@ -38,7 +38,8 @@ import kotlin.math.abs
  */
 class CameraGestureDetector(
     private val context: Context,
-    private val onSwipe: (direction: String) -> Unit
+    private val onSwipe: (direction: String) -> Unit,
+    private val onError: (() -> Unit)? = null
 ) {
     companion object {
         private const val TAG = "CameraGestureDetector"
@@ -120,6 +121,7 @@ class CameraGestureDetector(
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start camera gesture detection", e)
+                onError?.invoke()
             }
         }, ContextCompat.getMainExecutor(context))
     }

@@ -19,7 +19,10 @@ import kotlin.math.sqrt
  * Groups claps that happen close together in time (a "burst") and reports
  * the total count once the burst ends: 1 = down, 2 = up, 3 = back.
  */
-class ClapDetector(private val onClapBurst: (count: Int) -> Unit) {
+class ClapDetector(
+    private val onClapBurst: (count: Int) -> Unit,
+    private val onError: (() -> Unit)? = null
+) {
 
     companion object {
         private const val TAG = "ClapDetector"
@@ -73,6 +76,7 @@ class ClapDetector(private val onClapBurst: (count: Int) -> Unit) {
 
         if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
             Log.e(TAG, "AudioRecord failed to initialize")
+            onError?.invoke()
             return
         }
 
