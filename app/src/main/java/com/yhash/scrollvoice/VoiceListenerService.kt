@@ -59,7 +59,18 @@ class VoiceListenerService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        mode = intent?.getStringExtra(EXTRA_MODE) ?: MODE_VOICE
+        val prefs = getSharedPreferences("scroll_voice_prefs", MODE_PRIVATE)
+        val requestedMode = intent?.getStringExtra(EXTRA_MODE)
+        mode = if (requestedMode != null) {
+            // Real request from the app - remember it in case the OS kills
+            // and restarts this service later (which delivers a null intent).
+            prefs.edit().putString("mode", requestedMode).apply()
+            requestedMode
+        } else {
+            // System restart after a kill - recover whatever mode was
+            // actually running instead of silently reverting to voice.
+            prefs.getString("mode", MODE_VOICE) ?: MODE_VOICE
+        }
         startForegroundForMode(mode)
         startOverlay()
         if (!isRunning) {
