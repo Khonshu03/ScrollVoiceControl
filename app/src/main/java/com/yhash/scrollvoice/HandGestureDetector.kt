@@ -76,6 +76,11 @@ class HandGestureDetector(
         private const val INVERT_DIRECTION = false
         private const val MIRROR_X = true // front camera: flip so cursor moves the way it feels natural
 
+        // Smooths the cursor's on-screen position only - the raw (unsmoothed)
+        // position still drives swipe detection below, so this doesn't dull
+        // gesture responsiveness, it just stops the dot from jittering.
+        private const val CURSOR_SMOOTHING = 0.35f
+
         // Standard MediaPipe hand landmark indices.
         private const val WRIST = 0
         private const val INDEX_PIP = 6
@@ -99,6 +104,8 @@ class HandGestureDetector(
     private var refSetTime = 0L
     private var lastPointingTrueTime = 0L
     private var lastFireTime = 0L
+    private var smoothedX: Float? = null
+    private var smoothedY: Float? = null
 
     fun start() {
         stopped = false
@@ -122,6 +129,8 @@ class HandGestureDetector(
     fun stop() {
         stopped = true
         refY = null
+        smoothedX = null
+        smoothedY = null
         mainHandler.post {
             cameraProvider?.unbindAll()
             cameraProvider = null
@@ -239,9 +248,11 @@ class HandGestureDetector(
 
     private fun handleResult(result: HandLandmarkerResult) {
         val hands = result.landmarks()
+        val now = System.currentTimeMillis()
+
         if (hands.isEmpty()) {
-            mainHandler.post { onPositionUpdate?.invoke(0.5f, 0.5f, false) }
             maybeEndSession()
+            postCursorUpdate(now)
             return
         }
 
@@ -267,15 +278,18 @@ class HandGestureDetector(
         val displayX = if (MIRROR_X) 1f - rawX else rawX
         val displayY = tip.y()
 
-        mainHandler.post { onPositionUpdate?.invoke(displayX, displayY, isPointing) }
-
-        val now = System.currentTimeMillis()
+        // Smooth only the cursor's visual position - gesture math below
+        // keeps using the raw displayY so swipe sensitivity stays sharp.
+        smoothedX = lerp(smoothedX, displayX)
+        smoothedY = lerp(smoothedY, displayY)
 
         if (!isPointing) {
             maybeEndSession()
+            postCursorUpdate(now)
             return
         }
         lastPointingTrueTime = now
+        postCursorUpdate(now)
 
         val currentRef = refY
         if (currentRef == null) {
@@ -298,6 +312,21 @@ class HandGestureDetector(
             refY = displayY
             refSetTime = now
         }
+    }
+
+    private fun lerp(current: Float?, target: Float): Float =
+        if (current == null) target else current + (target - current) * CURSOR_SMOOTHING
+
+    /**
+     * The cursor stays visible as long as pointing was seen recently (within
+     * the grace window), even if this exact frame lost clean tracking -
+     * this is what stops the dot from blinking out during fast motion.
+     */
+    private fun postCursorUpdate(now: Long) {
+        val displayPointing = now - lastPointingTrueTime <= POINTING_LOSS_GRACE_MS
+        val x = smoothedX ?: 0.5f
+        val y = smoothedY ?: 0.5f
+        mainHandler.post { onPositionUpdate?.invoke(x, y, displayPointing) }
     }
 
     /** Ends the current pointing session once the loss has outlasted the motion-blur grace period. */
