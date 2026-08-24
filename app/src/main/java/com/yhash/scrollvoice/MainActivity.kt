@@ -7,19 +7,21 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.text.TextUtils
+import android.widget.Button
 import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.google.android.material.switchmaterial.SwitchMaterial
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var toggleSwitch: SwitchMaterial
     private lateinit var statusText: TextView
     private lateinit var modeGroup: RadioGroup
+    private lateinit var stopButton: Button
+
+    private var isRunning = false
 
     private val prefs by lazy { getSharedPreferences("scroll_voice_prefs", MODE_PRIVATE) }
 
@@ -29,10 +31,9 @@ class MainActivity : AppCompatActivity() {
         if (granted) {
             checkOverlayThenAccessibility()
         } else {
-            val mode = prefs.getString("mode", VoiceListenerService.MODE_VOICE)
+            val mode = prefs.getString("mode", VoiceListenerService.MODE_CAMERA)
             val permissionName = if (mode == VoiceListenerService.MODE_CAMERA) "Camera" else "Microphone"
             Toast.makeText(this, "$permissionName permission is required", Toast.LENGTH_SHORT).show()
-            toggleSwitch.isChecked = false
         }
     }
 
@@ -40,54 +41,51 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        toggleSwitch = findViewById(R.id.toggleSwitch)
         statusText = findViewById(R.id.statusText)
         modeGroup = findViewById(R.id.modeGroup)
+        stopButton = findViewById(R.id.stopButton)
 
-        val savedMode = prefs.getString("mode", VoiceListenerService.MODE_VOICE)
+        val savedMode = prefs.getString("mode", VoiceListenerService.MODE_CAMERA)
         when (savedMode) {
+            VoiceListenerService.MODE_VOICE -> findViewById<android.widget.RadioButton>(R.id.modeVoice).isChecked = true
             VoiceListenerService.MODE_CLAP -> findViewById<android.widget.RadioButton>(R.id.modeClap).isChecked = true
-            VoiceListenerService.MODE_MOTION -> findViewById<android.widget.RadioButton>(R.id.modeMotion).isChecked = true
-            VoiceListenerService.MODE_CAMERA -> findViewById<android.widget.RadioButton>(R.id.modeCamera).isChecked = true
+            else -> findViewById<android.widget.RadioButton>(R.id.modeCamera).isChecked = true
         }
 
+        // Picking a mode starts it right away - no separate on/off switch.
+        // Picking a different mode while one is already running just
+        // restarts with the new mode.
         modeGroup.setOnCheckedChangeListener { _, checkedId ->
             val mode = modeForCheckedId(checkedId)
             prefs.edit().putString("mode", mode).apply()
-            if (toggleSwitch.isChecked) {
-                startVoiceService(mode)
-            }
+            startFlow()
         }
 
-        toggleSwitch.setOnCheckedChangeListener { _, isChecked ->
-            if (isChecked) {
-                startFlow()
-            } else {
-                stopService(Intent(this, VoiceListenerService::class.java))
-                stopService(Intent(this, OverlayService::class.java))
-                statusText.text = "Voice control is OFF"
-            }
+        stopButton.setOnClickListener {
+            stopService(Intent(this, VoiceListenerService::class.java))
+            stopService(Intent(this, OverlayService::class.java))
+            isRunning = false
+            stopButton.visibility = android.view.View.GONE
+            statusText.text = "Voice control is OFF"
         }
     }
 
     private fun modeForCheckedId(checkedId: Int): String = when (checkedId) {
+        R.id.modeVoice -> VoiceListenerService.MODE_VOICE
         R.id.modeClap -> VoiceListenerService.MODE_CLAP
-        R.id.modeMotion -> VoiceListenerService.MODE_MOTION
-        R.id.modeCamera -> VoiceListenerService.MODE_CAMERA
-        else -> VoiceListenerService.MODE_VOICE
+        else -> VoiceListenerService.MODE_CAMERA
     }
 
     override fun onResume() {
         super.onResume()
-        if (toggleSwitch.isChecked && !isAccessibilityServiceEnabled()) {
+        if (isRunning && !isAccessibilityServiceEnabled()) {
             statusText.text = "Waiting for Accessibility permission..."
         }
     }
 
     private fun startFlow() {
-        val mode = prefs.getString("mode", VoiceListenerService.MODE_VOICE) ?: VoiceListenerService.MODE_VOICE
+        val mode = prefs.getString("mode", VoiceListenerService.MODE_CAMERA) ?: VoiceListenerService.MODE_CAMERA
         when (mode) {
-            VoiceListenerService.MODE_MOTION -> checkOverlayThenAccessibility() // needs neither mic nor camera
             VoiceListenerService.MODE_CAMERA -> {
                 if (hasCameraPermission()) {
                     checkOverlayThenAccessibility()
@@ -109,7 +107,7 @@ class MainActivity : AppCompatActivity() {
         if (!Settings.canDrawOverlays(this)) {
             Toast.makeText(
                 this,
-                "Allow \"display over other apps\" so the status dot can show",
+                "Allow \"display over other apps\" so the status dot/cursor can show",
                 Toast.LENGTH_LONG
             ).show()
             val intent = Intent(
@@ -134,11 +132,12 @@ class MainActivity : AppCompatActivity() {
             statusText.text = "Waiting for Accessibility permission..."
             return
         }
-        val mode = prefs.getString("mode", VoiceListenerService.MODE_VOICE) ?: VoiceListenerService.MODE_VOICE
+        val mode = prefs.getString("mode", VoiceListenerService.MODE_CAMERA) ?: VoiceListenerService.MODE_CAMERA
         startVoiceService(mode)
+        isRunning = true
+        stopButton.visibility = android.view.View.VISIBLE
         val modeLabel = when (mode) {
             VoiceListenerService.MODE_CLAP -> "clap"
-            VoiceListenerService.MODE_MOTION -> "motion"
             VoiceListenerService.MODE_CAMERA -> "camera"
             else -> "voice"
         }

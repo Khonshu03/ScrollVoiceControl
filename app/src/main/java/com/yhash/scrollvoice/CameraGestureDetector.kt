@@ -1,6 +1,8 @@
 package com.yhash.scrollvoice
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.util.Size
 import androidx.camera.core.CameraSelector
@@ -17,9 +19,16 @@ import kotlin.math.abs
 
 /**
  * Watches the front camera for a hand/finger swiping through the air in
- * front of the phone - not a phone tilt (see MotionDetector), not touching
- * the screen at all. Reports "up" / "down" the same way the other
- * detectors do.
+ * front of the phone - not a phone tilt, not touching the screen at all.
+ * Reports "up" / "down" the same way the other detectors do, plus a live
+ * vertical position update while motion is happening (used to drive an
+ * on-screen cursor dot).
+ *
+ * HOW TO USE IT: prop the phone up (or hold it) with the front camera
+ * facing you, hand about 20-40cm from the lens. Swipe your hand upward
+ * past the camera - like miming a swipe-up on the screen - to advance to
+ * the next reel. Swipe downward for the previous one. Only vertical motion
+ * is tracked, not left/right.
  *
  * This does NOT do full hand-skeleton tracking (no bundled ML model, no
  * MediaPipe/ML Kit dependency). Instead it reads only the Y (luminance)
@@ -30,8 +39,7 @@ import kotlin.math.abs
  * is far cheaper than real hand tracking and tends to be plenty reliable
  * for a deliberate swipe gesture at arm's length.
  *
- * Swipe your hand/finger upward past the camera (mimicking a swipe-up on
- * the screen) -> "down" (next reel). Swipe downward -> "up" (previous
+ * Swipe upward -> "down" (next reel). Swipe downward -> "up" (previous
  * reel). This matches the physical swipe direction Reels/TikTok already
  * use for "next". Flip INVERT_DIRECTION below if it feels backwards once
  * you try it.
@@ -39,6 +47,7 @@ import kotlin.math.abs
 class CameraGestureDetector(
     private val context: Context,
     private val onSwipe: (direction: String) -> Unit,
+    private val onPositionUpdate: ((normalizedY: Float, active: Boolean) -> Unit)? = null,
     private val onError: (() -> Unit)? = null
 ) {
     companion object {
@@ -65,6 +74,10 @@ class CameraGestureDetector(
 
         // Lower bar to keep an in-progress gesture "alive" between frames
         // so a genuine swipe doesn't fragment into several small triggers.
+        // Also used as the "is something moving right now" bar for the
+        // live cursor - lower than MOTION_START_THRESHOLD so the cursor
+        // shows up as soon as your hand enters frame, before a full swipe
+        // is recognized.
         private const val MOTION_CONTINUE_THRESHOLD = 25.0
 
         // Minimum vertical travel of the motion centroid (in band units,
@@ -87,6 +100,7 @@ class CameraGestureDetector(
     private enum class State { IDLE, TRACKING }
 
     private val analysisExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var cameraProvider: ProcessCameraProvider? = null
     private val lifecycleOwner = SimpleLifecycleOwner()
 
@@ -194,6 +208,13 @@ class CameraGestureDetector(
         // brightness is changing most this frame.
         val centroid = if (totalMotion > 0.01) weightedSum / totalMotion else lastCentroid
 
+        // Live position feedback for the on-screen cursor, independent of
+        // the swipe state machine below - shows up whenever something is
+        // moving in frame, not just during a recognized gesture.
+        val normalizedY = (centroid / (BAND_COUNT - 1)).toFloat().coerceIn(0f, 1f)
+        val isActive = totalMotion > MOTION_CONTINUE_THRESHOLD
+        mainHandler.post { onPositionUpdate?.invoke(normalizedY, isActive) }
+
         val now = System.currentTimeMillis()
         when (state) {
             State.IDLE -> {
@@ -229,7 +250,9 @@ class CameraGestureDetector(
         }
         lastFireTime = now
         Log.d(TAG, "Camera swipe detected -> $direction (centroid delta=$delta)")
-        onSwipe(direction)
+        // processFrame() runs on the background analysis thread - hop to
+        // main before this reaches any UI/AccessibilityService code.
+        mainHandler.post { onSwipe(direction) }
     }
 
     /**

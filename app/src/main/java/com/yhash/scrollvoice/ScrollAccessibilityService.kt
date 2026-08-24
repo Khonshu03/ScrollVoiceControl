@@ -16,12 +16,19 @@ class ScrollAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "ScrollA11yService"
+        private const val SWIPE_DURATION_MS = 300L
 
         // Set when the service connects, cleared when it's destroyed.
         // VoiceListenerService calls into this to trigger gestures.
         var instance: ScrollAccessibilityService? = null
             private set
     }
+
+    // Android only allows one in-flight gesture from a service at a time -
+    // dispatchGesture() silently returns false if you call it again before
+    // the previous one finishes. Tracking this so a rapid-fire command
+    // (e.g. a fast clap burst) doesn't get dropped without any feedback.
+    @Volatile private var gestureInFlight = false
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -53,6 +60,16 @@ class ScrollAccessibilityService : AccessibilityService() {
     }
 
     private fun swipe(fromBottomFraction: Float, toTopFraction: Float) {
+        if (gestureInFlight) {
+            // A previous swipe hasn't finished yet - dispatching now would
+            // just be silently rejected. Log it so it's at least visible
+            // why this particular command didn't do anything, instead of
+            // looking like a random miss.
+            Log.w(TAG, "Skipped swipe - previous gesture still in flight")
+            OverlayService.instance?.showError()
+            return
+        }
+
         val metrics: DisplayMetrics = resources.displayMetrics
         val centerX = metrics.widthPixels / 2f
         val startY = metrics.heightPixels * fromBottomFraction
@@ -64,9 +81,29 @@ class ScrollAccessibilityService : AccessibilityService() {
         }
 
         val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, 250))
+            .addStroke(GestureDescription.StrokeDescription(path, 0, SWIPE_DURATION_MS))
             .build()
 
-        dispatchGesture(gesture, null, null)
+        gestureInFlight = true
+        val accepted = dispatchGesture(gesture, object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                gestureInFlight = false
+                OverlayService.instance?.clearError()
+            }
+
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                gestureInFlight = false
+                Log.w(TAG, "Swipe gesture was cancelled by the system")
+                OverlayService.instance?.showError()
+            }
+        }, null)
+
+        if (!accepted) {
+            // dispatchGesture() returned false synchronously - it never
+            // started at all (service not ready, screen off, etc).
+            gestureInFlight = false
+            Log.w(TAG, "dispatchGesture() rejected the swipe")
+            OverlayService.instance?.showError()
+        }
     }
 }
