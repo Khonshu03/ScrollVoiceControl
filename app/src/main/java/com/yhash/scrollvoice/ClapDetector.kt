@@ -30,10 +30,10 @@ class ClapDetector(
         private const val CHUNK_SIZE = 512 // ~32ms per chunk at 16kHz
 
         // How many times louder than the noise floor a chunk must be to count as a clap.
-        private const val SPIKE_MULTIPLIER = 3.0
+        private const val SPIKE_MULTIPLIER = 3.6
 
         // Absolute floor so near-silence doesn't get treated as "loud relative to nothing".
-        private const val MIN_ABSOLUTE_RMS = 250.0
+        private const val MIN_ABSOLUTE_RMS = 400.0
 
         // Once a clap is detected, ignore new spikes for this long (its own decay tail).
         private const val REFRACTORY_MS = 180L
@@ -137,6 +137,8 @@ class ClapDetector(
         burstFinalizeRunnable?.let { handler.removeCallbacks(it) }
     }
 
+    private var wasQuietLastChunk = true
+
     private fun processChunk(buffer: ShortArray, length: Int) {
         var sumSquares = 0.0
         for (i in 0 until length) {
@@ -160,7 +162,11 @@ class ClapDetector(
         val isSpike = rms > noiseFloor * SPIKE_MULTIPLIER && rms > MIN_ABSOLUTE_RMS
         val pastRefractory = (now - lastClapTime) > REFRACTORY_MS
 
-        if (isSpike && pastRefractory) {
+        // A real clap is a spike rising out of quiet. Sustained loud sound
+        // (talking, laughing, dialogue that leaked past ducking) stays
+        // "loud" chunk after chunk - require the moment just before this
+        // one to have been quiet, so ongoing noise can't keep re-firing.
+        if (isSpike && pastRefractory && wasQuietLastChunk) {
             lastClapTime = now
             registerClap(now)
         } else if (!isSpike) {
@@ -168,6 +174,7 @@ class ClapDetector(
             // themselves don't drag the baseline up.
             noiseFloor = noiseFloor * 0.98 + rms * 0.02
         }
+        wasQuietLastChunk = !isSpike
     }
 
     private fun registerClap(now: Long) {

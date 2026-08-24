@@ -43,7 +43,7 @@ class VoiceListenerService : Service() {
     private var speechRecognizer: SpeechRecognizer? = null
     private var clapDetector: ClapDetector? = null
     private var motionDetector: MotionDetector? = null
-    private var cameraGestureDetector: CameraGestureDetector? = null
+    private var handGestureDetector: HandGestureDetector? = null
     private val handler = Handler(Looper.getMainLooper())
     private var isRunning = false
     private var mode = MODE_VOICE
@@ -88,8 +88,8 @@ class VoiceListenerService : Service() {
         clapDetector = null
         motionDetector?.stop()
         motionDetector = null
-        cameraGestureDetector?.stop()
-        cameraGestureDetector = null
+        handGestureDetector?.stop()
+        handGestureDetector = null
         abandonDucking()
         stopOverlay()
         super.onDestroy()
@@ -195,16 +195,19 @@ class VoiceListenerService : Service() {
     }
 
     private fun startCameraGestureDetection() {
-        cameraGestureDetector = CameraGestureDetector(
+        handGestureDetector = HandGestureDetector(
             context = this,
             onSwipe = { direction ->
                 Log.d(TAG, "Camera swipe -> $direction")
                 ScrollAccessibilityService.instance?.performScroll(direction)
                 OverlayService.instance?.pulse()
             },
+            onPositionUpdate = { x, y, pointing ->
+                OverlayService.instance?.updateCursor(x, y, pointing)
+            },
             onError = { OverlayService.instance?.showError() }
         )
-        cameraGestureDetector?.start()
+        handGestureDetector?.start()
     }
 
     private fun startListening() {
@@ -293,7 +296,7 @@ class VoiceListenerService : Service() {
         val text = when (mode) {
             MODE_CLAP -> "Listening for claps"
             MODE_MOTION -> "Watching for phone tilt"
-            MODE_CAMERA -> "Watching camera for hand swipes"
+            MODE_CAMERA -> "Watching for a pointing finger"
             else -> getString(R.string.notification_text_listening)
         }
         return NotificationCompat.Builder(this, CHANNEL_ID)

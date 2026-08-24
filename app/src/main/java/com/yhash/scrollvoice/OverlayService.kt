@@ -148,13 +148,12 @@ class OverlayService : Service() {
     }
 
     /**
-     * Moves the cursor to reflect the camera detector's current vertical
-     * motion centroid (0f = top of frame, 1f = bottom) and fades it in
-     * while `active` (something's moving in front of the camera), fading
-     * it out when idle. Safe to call frequently - it's cheap layout param
-     * updates, not view recreation.
+     * Moves the cursor to the tracked index fingertip position (0f-1f on
+     * each axis) and fades it in only while a pointing gesture is actively
+     * detected, fading out otherwise. Safe to call frequently - it's cheap
+     * layout param updates, not view recreation.
      */
-    fun updateCursor(normalizedY: Float, active: Boolean) {
+    fun updateCursor(normalizedX: Float, normalizedY: Float, pointing: Boolean) {
         ensureCursor()
         val view = cursorView ?: return
         val params = view.layoutParams as? WindowManager.LayoutParams ?: return
@@ -164,12 +163,14 @@ class OverlayService : Service() {
         val bottomMargin = 140 * metrics.density
         val usableHeight = (metrics.heightPixels - topMargin - bottomMargin).coerceAtLeast(0f)
         val targetY = (topMargin + normalizedY.coerceIn(0f, 1f) * usableHeight).toInt()
+        val targetX = (normalizedX.coerceIn(0f, 1f) * metrics.widthPixels).toInt()
 
-        if (params.y != targetY) {
+        if (params.y != targetY || params.x != targetX) {
             params.y = targetY
+            params.x = targetX
             windowManager?.updateViewLayout(view, params)
         }
-        view.animate().alpha(if (active) 0.7f else 0f).setDuration(150).start()
+        view.animate().alpha(if (pointing) 0.85f else 0f).setDuration(150).start()
     }
 
     /** Sets the persistent "armed and watching" color for the active mode, clearing any prior error. */
