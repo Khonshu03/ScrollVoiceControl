@@ -4,6 +4,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
@@ -59,7 +60,7 @@ class VoiceListenerService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         mode = intent?.getStringExtra(EXTRA_MODE) ?: MODE_VOICE
-        startForeground(NOTIFICATION_ID, buildNotification())
+        startForegroundForMode(mode)
         startOverlay()
         if (!isRunning) {
             isRunning = true
@@ -96,6 +97,29 @@ class VoiceListenerService : Service() {
 
     override fun onBind(intent: Intent?) = null
 
+    /**
+     * The manifest declares foregroundServiceType="microphone|camera" since
+     * this single service can run in either mode. But on Android 10+, if
+     * startForeground() is called WITHOUT an explicit type, the system
+     * demands every type listed in the manifest be satisfied - meaning
+     * Motion mode (which needs neither permission) would still require both
+     * mic and camera permissions and crash. Passing the explicit type here
+     * for each mode avoids that.
+     */
+    private fun startForegroundForMode(mode: String) {
+        val notification = buildNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val type = when (mode) {
+                MODE_VOICE, MODE_CLAP -> ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                MODE_CAMERA -> ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+                else -> ServiceInfo.FOREGROUND_SERVICE_TYPE_NONE // MODE_MOTION needs neither
+            }
+            startForeground(NOTIFICATION_ID, notification, type)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
     private fun requestDucking() {
         val am = audioManager ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -127,7 +151,9 @@ class VoiceListenerService : Service() {
 
     private fun startOverlay() {
         if (android.provider.Settings.canDrawOverlays(this)) {
-            startService(Intent(this, OverlayService::class.java))
+            startService(Intent(this, OverlayService::class.java).apply {
+                putExtra(EXTRA_MODE, mode)
+            })
         }
     }
 
@@ -136,43 +162,55 @@ class VoiceListenerService : Service() {
     }
 
     private fun startClapDetection() {
-        clapDetector = ClapDetector { count ->
-            val direction = when (count) {
-                1 -> "down"
-                2 -> "up"
-                3 -> "back"
-                else -> null
-            }
-            if (direction != null) {
-                Log.d(TAG, "Clap burst: $count -> $direction")
-                ScrollAccessibilityService.instance?.performScroll(direction)
-                OverlayService.instance?.pulse()
-            }
-        }
+        clapDetector = ClapDetector(
+            onClapBurst = { count ->
+                val direction = when (count) {
+                    1 -> "down"
+                    2 -> "up"
+                    3 -> "back"
+                    else -> null
+                }
+                if (direction != null) {
+                    Log.d(TAG, "Clap burst: $count -> $direction")
+                    ScrollAccessibilityService.instance?.performScroll(direction)
+                    OverlayService.instance?.pulse()
+                }
+            },
+            onError = { OverlayService.instance?.showError() }
+        )
         clapDetector?.start()
     }
 
     private fun startMotionDetection() {
-        motionDetector = MotionDetector(this) { direction ->
-            Log.d(TAG, "Motion tilt -> $direction")
-            ScrollAccessibilityService.instance?.performScroll(direction)
-            OverlayService.instance?.pulse()
-        }
+        motionDetector = MotionDetector(
+            context = this,
+            onTilt = { direction ->
+                Log.d(TAG, "Motion tilt -> $direction")
+                ScrollAccessibilityService.instance?.performScroll(direction)
+                OverlayService.instance?.pulse()
+            },
+            onError = { OverlayService.instance?.showError() }
+        )
         motionDetector?.start()
     }
 
     private fun startCameraGestureDetection() {
-        cameraGestureDetector = CameraGestureDetector(this) { direction ->
-            Log.d(TAG, "Camera swipe -> $direction")
-            ScrollAccessibilityService.instance?.performScroll(direction)
-            OverlayService.instance?.pulse()
-        }
+        cameraGestureDetector = CameraGestureDetector(
+            context = this,
+            onSwipe = { direction ->
+                Log.d(TAG, "Camera swipe -> $direction")
+                ScrollAccessibilityService.instance?.performScroll(direction)
+                OverlayService.instance?.pulse()
+            },
+            onError = { OverlayService.instance?.showError() }
+        )
         cameraGestureDetector?.start()
     }
 
     private fun startListening() {
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             Log.e(TAG, "Speech recognition not available on this device")
+            OverlayService.instance?.showError()
             return
         }
 
