@@ -64,7 +64,12 @@ class HandGestureDetector(
         // times farther from the wrist than its own PIP knuckle.
         private const val EXTENDED_RATIO = 1.15
 
-        private const val MIN_SWIPE_DELTA = 0.12 // fraction of frame height
+        // "up" (finger moving down toward you) needs less travel than "down"
+        // (finger moving up away from you) - your hand naturally has less
+        // room to move downward toward your body than upward away from it,
+        // so an equal threshold makes "up" feel less reliable in practice.
+        private const val MIN_SWIPE_DELTA_DOWN = 0.12f // finger rises (Y decreases)
+        private const val MIN_SWIPE_DELTA_UP = 0.08f   // finger drops (Y increases)
         private const val MIN_GESTURE_DURATION_MS = 60L
         private const val COOLDOWN_MS = 550L
 
@@ -303,7 +308,8 @@ class HandGestureDetector(
         val delta = displayY - currentRef
         val inCooldown = now - lastFireTime < COOLDOWN_MS
 
-        if (!inCooldown && duration >= MIN_GESTURE_DURATION_MS && kotlin.math.abs(delta) >= MIN_SWIPE_DELTA) {
+        val threshold = if (delta < 0) MIN_SWIPE_DELTA_DOWN else MIN_SWIPE_DELTA_UP
+        if (!inCooldown && duration >= MIN_GESTURE_DURATION_MS && kotlin.math.abs(delta) >= threshold) {
             fire(delta, now)
             // Reset baseline to current position immediately, so the
             // natural "bring hand back down" motion after a swipe needs
