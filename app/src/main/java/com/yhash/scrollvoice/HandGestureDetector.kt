@@ -64,10 +64,14 @@ class HandGestureDetector(
         // times farther from the wrist than its own PIP knuckle.
         private const val EXTENDED_RATIO = 1.15
 
-        private const val MIN_SWIPE_DELTA = 0.16 // fraction of frame height
-        private const val MIN_GESTURE_DURATION_MS = 80L
-        private const val MAX_GESTURE_DURATION_MS = 1200L
-        private const val COOLDOWN_MS = 700L
+        private const val MIN_SWIPE_DELTA = 0.12 // fraction of frame height
+        private const val MIN_GESTURE_DURATION_MS = 60L
+        private const val COOLDOWN_MS = 550L
+
+        // Fast swipes cause motion blur, which can make MediaPipe briefly
+        // lose clean landmarks mid-gesture. Tolerate a short gap in
+        // "pointing" detection before treating the gesture as actually over.
+        private const val POINTING_LOSS_GRACE_MS = 220L
 
         private const val INVERT_DIRECTION = false
         private const val MIRROR_X = true // front camera: flip so cursor moves the way it feels natural
@@ -84,8 +88,6 @@ class HandGestureDetector(
         private const val PINKY_TIP = 20
     }
 
-    private enum class State { IDLE, TRACKING }
-
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var cameraProvider: ProcessCameraProvider? = null
@@ -93,10 +95,9 @@ class HandGestureDetector(
     private var handLandmarker: HandLandmarker? = null
     private var stopped = false
 
-    private var state = State.IDLE
-    private var gestureStartTime = 0L
-    private var startY = 0f
-    private var lastY = 0f
+    private var refY: Float? = null
+    private var refSetTime = 0L
+    private var lastPointingTrueTime = 0L
     private var lastFireTime = 0L
 
     fun start() {
@@ -120,6 +121,7 @@ class HandGestureDetector(
 
     fun stop() {
         stopped = true
+        refY = null
         mainHandler.post {
             cameraProvider?.unbindAll()
             cameraProvider = null
@@ -239,7 +241,7 @@ class HandGestureDetector(
         val hands = result.landmarks()
         if (hands.isEmpty()) {
             mainHandler.post { onPositionUpdate?.invoke(0.5f, 0.5f, false) }
-            evaluateEndOfGesture()
+            maybeEndSession()
             return
         }
 
@@ -268,39 +270,45 @@ class HandGestureDetector(
         mainHandler.post { onPositionUpdate?.invoke(displayX, displayY, isPointing) }
 
         val now = System.currentTimeMillis()
-        when (state) {
-            State.IDLE -> {
-                if (isPointing && now - lastFireTime > COOLDOWN_MS) {
-                    state = State.TRACKING
-                    gestureStartTime = now
-                    startY = displayY
-                    lastY = displayY
-                }
-            }
-            State.TRACKING -> {
-                lastY = displayY
-                val duration = now - gestureStartTime
-                if (!isPointing || duration > MAX_GESTURE_DURATION_MS) {
-                    finishGesture(now)
-                }
-            }
+
+        if (!isPointing) {
+            maybeEndSession()
+            return
+        }
+        lastPointingTrueTime = now
+
+        val currentRef = refY
+        if (currentRef == null) {
+            // First frame of a new pointing session - establish baseline.
+            refY = displayY
+            refSetTime = now
+            return
+        }
+
+        val duration = now - refSetTime
+        val delta = displayY - currentRef
+        val inCooldown = now - lastFireTime < COOLDOWN_MS
+
+        if (!inCooldown && duration >= MIN_GESTURE_DURATION_MS && kotlin.math.abs(delta) >= MIN_SWIPE_DELTA) {
+            fire(delta, now)
+            // Reset baseline to current position immediately, so the
+            // natural "bring hand back down" motion after a swipe needs
+            // its own full-size movement to count as a new gesture,
+            // instead of the retract itself being read as the opposite swipe.
+            refY = displayY
+            refSetTime = now
         }
     }
 
-    private fun evaluateEndOfGesture() {
-        if (state == State.TRACKING) {
-            finishGesture(System.currentTimeMillis())
+    /** Ends the current pointing session once the loss has outlasted the motion-blur grace period. */
+    private fun maybeEndSession() {
+        val now = System.currentTimeMillis()
+        if (refY != null && now - lastPointingTrueTime > POINTING_LOSS_GRACE_MS) {
+            refY = null
         }
     }
 
-    private fun finishGesture(now: Long) {
-        val duration = now - gestureStartTime
-        val delta = lastY - startY
-        state = State.IDLE
-
-        if (duration < MIN_GESTURE_DURATION_MS) return
-        if (kotlin.math.abs(delta) < MIN_SWIPE_DELTA) return
-
+    private fun fire(delta: Float, now: Long) {
         // Fingertip Y decreasing = moved toward top of frame = swipe upward,
         // which matches Reels/TikTok's physical "swipe up for next" motion.
         var direction = if (delta < 0) "down" else "up"
