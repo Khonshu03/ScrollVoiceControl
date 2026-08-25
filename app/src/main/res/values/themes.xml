@@ -6,5 +6,7 @@
         <item name="android:windowLightStatusBar">false</item>
         <item name="colorPrimary">@color/purple_500</item>
         <item name="colorAccent">@color/purple_500</item>
+        <item name="android:fontFamily">@font/space_grotesk</item>
+        <item name="fontFamily">@font/space_grotesk</item>
     </style>
 </resources>

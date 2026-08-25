@@ -1,16 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Background -->
-    <color name="bg_top">#150F26</color>
-    <color name="bg_bottom">#0A0714</color>
+    <!-- Background - neutral dark gray, not tinted. The color signal lives
+         in the buttons/chips, not the backdrop. -->
+    <color name="bg_top">#1C1C20</color>
+    <color name="bg_bottom">#111113</color>
 
     <!-- Surfaces -->
-    <color name="surface_card">#1A1530</color>
-    <color name="surface_card_stroke">#2E2650</color>
-    <color name="surface_chip_unselected">#17122A</color>
-    <color name="surface_chip_stroke">#2A2345</color>
+    <color name="surface_card">#232327</color>
+    <color name="surface_card_stroke">#34343A</color>
+    <color name="surface_chip_unselected">#1D1D21</color>
+    <color name="surface_chip_stroke">#333338</color>
 
-    <!-- Brand purple -->
+    <!-- Brand purple - the Stop button / hero glow accent -->
     <color name="purple_100">#EDE9FE</color>
     <color name="purple_300">#C4B5FD</color>
     <color name="purple_400">#A78BFA</color>
@@ -18,13 +19,28 @@
     <color name="purple_600">#7C3AED</color>
     <color name="purple_700">#6425D0</color>
 
+    <!-- Mode colors - match the overlay status-dot colors in OverlayService
+         (MODE_COLORS) 1:1, so the in-app chip and the on-screen dot always
+         agree on what color = which mode. -->
+    <color name="mode_voice">#2196F3</color>
+    <color name="mode_voice_dark">#1769AA</color>
+    <color name="mode_voice_light">#64B5F6</color>
+
+    <color name="mode_clap">#FF9800</color>
+    <color name="mode_clap_dark">#C77700</color>
+    <color name="mode_clap_light">#FFB74D</color>
+
+    <color name="mode_camera">#009688</color>
+    <color name="mode_camera_dark">#00695C</color>
+    <color name="mode_camera_light">#4DB6AC</color>
+
     <!-- Text -->
-    <color name="text_primary">#F5F3FF</color>
-    <color name="text_secondary">#A79CC7</color>
-    <color name="text_muted">#6E6488</color>
+    <color name="text_primary">#F5F5F7</color>
+    <color name="text_secondary">#A3A3AC</color>
+    <color name="text_muted">#6B6B74</color>
 
     <!-- Status -->
     <color name="status_on">#34D399</color>
-    <color name="status_off">#4B4568</color>
+    <color name="status_off">#4B4B54</color>
     <color name="status_on_glow">#5C34D399</color>
 </resources>
