@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Background -->
+    <color name="bg_top">#150F26</color>
+    <color name="bg_bottom">#0A0714</color>
+
+    <!-- Surfaces -->
+    <color name="surface_card">#1A1530</color>
+    <color name="surface_card_stroke">#2E2650</color>
+    <color name="surface_chip_unselected">#17122A</color>
+    <color name="surface_chip_stroke">#2A2345</color>
+
+    <!-- Brand purple -->
+    <color name="purple_100">#EDE9FE</color>
+    <color name="purple_300">#C4B5FD</color>
+    <color name="purple_400">#A78BFA</color>
+    <color name="purple_500">#8B5CF6</color>
+    <color name="purple_600">#7C3AED</color>
+    <color name="purple_700">#6425D0</color>
+
+    <!-- Text -->
+    <color name="text_primary">#F5F3FF</color>
+    <color name="text_secondary">#A79CC7</color>
+    <color name="text_muted">#6E6488</color>
+
+    <!-- Status -->
+    <color name="status_on">#34D399</color>
+    <color name="status_off">#4B4568</color>
+    <color name="status_on_glow">#5C34D399</color>
+</resources>

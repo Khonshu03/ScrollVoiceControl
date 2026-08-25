@@ -1,3 +1,10 @@
 <resources>
-    <style name="Theme.ScrollVoiceControl" parent="Theme.MaterialComponents.DayNight.NoActionBar" />
+    <style name="Theme.ScrollVoiceControl" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowBackground">@drawable/bg_app</item>
+        <item name="android:statusBarColor">@color/bg_top</item>
+        <item name="android:navigationBarColor">@color/bg_bottom</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="colorPrimary">@color/purple_500</item>
+        <item name="colorAccent">@color/purple_500</item>
+    </style>
 </resources>
