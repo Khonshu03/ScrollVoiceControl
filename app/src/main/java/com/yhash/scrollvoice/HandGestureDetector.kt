@@ -86,6 +86,12 @@ class HandGestureDetector(
         // gesture responsiveness, it just stops the dot from jittering.
         private const val CURSOR_SMOOTHING = 0.35f
 
+        // Camera hardware sometimes hasn't finished releasing from a
+        // previous session yet - retry a couple times with a short delay
+        // instead of giving up on the first failure.
+        private const val MAX_CAMERA_RETRIES = 3
+        private const val CAMERA_RETRY_DELAY_MS = 500L
+
         // Standard MediaPipe hand landmark indices.
         private const val WRIST = 0
         private const val INDEX_PIP = 6
@@ -183,7 +189,7 @@ class HandGestureDetector(
         return HandLandmarker.createFromOptions(context, options)
     }
 
-    private fun startCamera() {
+    private fun startCamera(attempt: Int = 1) {
         lifecycleOwner.start()
         val providerFuture = ProcessCameraProvider.getInstance(context)
         providerFuture.addListener({
@@ -204,9 +210,19 @@ class HandGestureDetector(
                     CameraSelector.DEFAULT_FRONT_CAMERA,
                     analysis
                 )
+                Log.d(TAG, "Camera bound successfully (attempt $attempt)")
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to start camera", e)
-                onError?.invoke()
+                // The camera hardware doesn't always finish releasing
+                // instantly after a previous session ends - retrying after
+                // a short delay resolves most "works once, then fails"
+                // camera issues on Android without any user-visible impact.
+                Log.w(TAG, "Camera bind failed on attempt $attempt: ${e.message}")
+                if (attempt < MAX_CAMERA_RETRIES && !stopped) {
+                    mainHandler.postDelayed({ startCamera(attempt + 1) }, CAMERA_RETRY_DELAY_MS)
+                } else {
+                    Log.e(TAG, "Camera bind failed after $attempt attempts", e)
+                    onError?.invoke()
+                }
             }
         }, ContextCompat.getMainExecutor(context))
     }

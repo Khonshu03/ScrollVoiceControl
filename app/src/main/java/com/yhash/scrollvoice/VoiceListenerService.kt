@@ -28,7 +28,6 @@ class VoiceListenerService : Service() {
         const val EXTRA_MODE = "mode"
         const val MODE_VOICE = "voice"
         const val MODE_CLAP = "clap"
-        const val MODE_MOTION = "motion"
         const val MODE_CAMERA = "camera"
 
         private val COMMANDS = mapOf(
@@ -42,7 +41,6 @@ class VoiceListenerService : Service() {
 
     private var speechRecognizer: SpeechRecognizer? = null
     private var clapDetector: ClapDetector? = null
-    private var motionDetector: MotionDetector? = null
     private var handGestureDetector: HandGestureDetector? = null
     private val handler = Handler(Looper.getMainLooper())
     private var isRunning = false
@@ -80,7 +78,6 @@ class VoiceListenerService : Service() {
                     requestDucking()
                     startClapDetection()
                 }
-                MODE_MOTION -> startMotionDetection()
                 MODE_CAMERA -> startCameraGestureDetection()
                 else -> {
                     requestDucking()
@@ -97,8 +94,6 @@ class VoiceListenerService : Service() {
         speechRecognizer = null
         clapDetector?.stop()
         clapDetector = null
-        motionDetector?.stop()
-        motionDetector = null
         handGestureDetector?.stop()
         handGestureDetector = null
         abandonDucking()
@@ -123,7 +118,7 @@ class VoiceListenerService : Service() {
             val type = when (mode) {
                 MODE_VOICE, MODE_CLAP -> ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
                 MODE_CAMERA -> ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
-                else -> ServiceInfo.FOREGROUND_SERVICE_TYPE_NONE // MODE_MOTION needs neither
+                else -> ServiceInfo.FOREGROUND_SERVICE_TYPE_NONE
             }
             startForeground(NOTIFICATION_ID, notification, type)
         } else {
@@ -133,7 +128,7 @@ class VoiceListenerService : Service() {
 
     private fun requestDucking() {
         val am = audioManager ?: return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val attrs = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ASSISTANT)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -147,6 +142,12 @@ class VoiceListenerService : Service() {
         } else {
             @Suppress("DEPRECATION")
             am.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+        }
+        if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            // Not fatal - listening still works without ducking, media just
+            // won't get quieter while we're listening. Log it so a "why
+            // isn't ducking happening" report is traceable.
+            Log.w(TAG, "Audio focus request denied (result=$result) - continuing without ducking")
         }
     }
 
@@ -192,19 +193,6 @@ class VoiceListenerService : Service() {
         clapDetector?.start()
     }
 
-    private fun startMotionDetection() {
-        motionDetector = MotionDetector(
-            context = this,
-            onTilt = { direction ->
-                Log.d(TAG, "Motion tilt -> $direction")
-                ScrollAccessibilityService.instance?.performScroll(direction)
-                OverlayService.instance?.pulse()
-            },
-            onError = { OverlayService.instance?.showError() }
-        )
-        motionDetector?.start()
-    }
-
     private fun startCameraGestureDetection() {
         handGestureDetector = HandGestureDetector(
             context = this,
@@ -216,10 +204,14 @@ class VoiceListenerService : Service() {
             onPositionUpdate = { x, y, pointing ->
                 OverlayService.instance?.updateCursor(x, y, pointing)
             },
-            onError = { OverlayService.instance?.showError() }
-        )
-        handGestureDetector?.start()
-    }
+            onError = {
+                OverlayService.instance?.showError()
+                android.widget.Toast.makeText(
+                    this,
+                    "Camera couldn't start - try turning camera mode off and on again",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
 
     private fun startListening() {
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
@@ -236,10 +228,10 @@ class VoiceListenerService : Service() {
                 }
 
                 override fun onPartialResults(partialResults: Bundle?) {
-                    // React to partial (in-progress) results too, so a
-                    // command fires as soon as it's heard rather than
-                    // waiting for the recognizer to decide speech ended.
-                    handleResults(partialResults)
+                    // Intentionally not matched on - a partial mid-sentence
+                    // guess can false-match a keyword and consume the
+                    // debounce window, blocking the real command that
+                    // follows. Only final results are trusted.
                 }
 
                 override fun onError(error: Int) {
@@ -261,7 +253,7 @@ class VoiceListenerService : Service() {
         if (!isRunning) return
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
         }
         speechRecognizer?.startListening(intent)
@@ -306,7 +298,6 @@ class VoiceListenerService : Service() {
     private fun buildNotification(): android.app.Notification {
         val text = when (mode) {
             MODE_CLAP -> "Listening for claps"
-            MODE_MOTION -> "Watching for phone tilt"
             MODE_CAMERA -> "Watching for a pointing finger"
             else -> getString(R.string.notification_text_listening)
         }
