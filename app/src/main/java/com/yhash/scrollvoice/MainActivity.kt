@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.text.TextUtils
 import android.widget.Button
+import android.widget.ImageView
 import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
@@ -18,6 +19,7 @@ import androidx.core.content.ContextCompat
 class MainActivity : AppCompatActivity() {
 
     private lateinit var statusText: TextView
+    private lateinit var statusDot: ImageView
     private lateinit var modeGroup: RadioGroup
     private lateinit var stopButton: Button
 
@@ -42,6 +44,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         statusText = findViewById(R.id.statusText)
+        statusDot = findViewById(R.id.statusDot)
         modeGroup = findViewById(R.id.modeGroup)
         stopButton = findViewById(R.id.stopButton)
 
@@ -67,6 +70,7 @@ class MainActivity : AppCompatActivity() {
             isRunning = false
             stopButton.visibility = android.view.View.GONE
             statusText.text = "Voice control is OFF"
+            statusDot.setImageResource(R.drawable.dot_off)
         }
     }
 
@@ -142,6 +146,7 @@ class MainActivity : AppCompatActivity() {
             else -> "voice"
         }
         statusText.text = "Voice control is ON ($modeLabel mode)"
+        statusDot.setImageResource(R.drawable.dot_on)
     }
 
     private fun startVoiceService(mode: String) {
