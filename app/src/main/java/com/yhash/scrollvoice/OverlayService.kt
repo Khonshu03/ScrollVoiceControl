@@ -1,5 +1,6 @@
 package com.yhash.scrollvoice
 
+import android.animation.ValueAnimator
 import android.app.Service
 import android.content.Intent
 import android.graphics.Color
@@ -11,6 +12,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.WindowManager
+import android.view.animation.LinearInterpolator
 import android.widget.ImageView
 
 /**
@@ -45,12 +47,20 @@ class OverlayService : Service() {
             VoiceListenerService.MODE_CLAP to Color.parseColor("#FFFF9800"),
             VoiceListenerService.MODE_CAMERA to Color.parseColor("#FF009688")
         )
+
+        // Hand-landmark inference only yields ~10-20 position updates/sec.
+        // Snapping the overlay straight to each new point makes it visibly
+        // teleport on a 90/120Hz screen even though the position itself is
+        // already smoothed upstream. Animating between points at this
+        // duration bridges the gap so motion reads as continuous.
+        private const val CURSOR_MOVE_DURATION_MS = 90L
     }
 
     private var windowManager: WindowManager? = null
     private var dotView: ImageView? = null
     private var cursorView: ImageView? = null
     private val handler = Handler(Looper.getMainLooper())
+    private var moveAnimator: ValueAnimator? = null
 
     private var baseColor: Int = DEFAULT_COLOR
     private var isError: Boolean = false
@@ -143,6 +153,8 @@ class OverlayService : Service() {
     }
 
     private fun removeCursor() {
+        moveAnimator?.cancel()
+        moveAnimator = null
         cursorView?.let { windowManager?.removeView(it) }
         cursorView = null
     }
@@ -165,12 +177,32 @@ class OverlayService : Service() {
         val targetY = (topMargin + normalizedY.coerceIn(0f, 1f) * usableHeight).toInt()
         val targetX = (normalizedX.coerceIn(0f, 1f) * metrics.widthPixels).toInt()
 
-        if (params.y != targetY || params.x != targetX) {
-            params.y = targetY
-            params.x = targetX
-            windowManager?.updateViewLayout(view, params)
+        if (params.x != targetX || params.y != targetY) {
+            animateCursorTo(view, params, targetX, targetY)
         }
         view.animate().alpha(if (pointing) 0.85f else 0f).setDuration(150).start()
+    }
+
+    /** Glides the overlay from its current on-screen position to the new target instead of snapping to it. */
+    private fun animateCursorTo(view: ImageView, params: WindowManager.LayoutParams, targetX: Int, targetY: Int) {
+        moveAnimator?.cancel()
+        val startX = params.x
+        val startY = params.y
+        val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = CURSOR_MOVE_DURATION_MS
+            // Linear on purpose: the position fed in is already exponentially
+            // smoothed upstream, so an easing curve here would just stack a
+            // second lag on top of that rather than adding anything useful.
+            interpolator = LinearInterpolator()
+            addUpdateListener { anim ->
+                val t = anim.animatedValue as Float
+                params.x = (startX + (targetX - startX) * t).toInt()
+                params.y = (startY + (targetY - startY) * t).toInt()
+                runCatching { windowManager?.updateViewLayout(view, params) }
+            }
+        }
+        moveAnimator = animator
+        animator.start()
     }
 
     /** Sets the persistent "armed and watching" color for the active mode, clearing any prior error. */
