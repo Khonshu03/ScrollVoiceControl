@@ -60,13 +60,9 @@ class VoiceListenerService : Service() {
         val prefs = getSharedPreferences("scroll_voice_prefs", MODE_PRIVATE)
         val requestedMode = intent?.getStringExtra(EXTRA_MODE)
         mode = if (requestedMode != null) {
-            // Real request from the app - remember it in case the OS kills
-            // and restarts this service later (which delivers a null intent).
             prefs.edit().putString("mode", requestedMode).apply()
             requestedMode
         } else {
-            // System restart after a kill - recover whatever mode was
-            // actually running instead of silently reverting to voice.
             prefs.getString("mode", MODE_VOICE) ?: MODE_VOICE
         }
         startForegroundForMode(mode)
@@ -103,15 +99,6 @@ class VoiceListenerService : Service() {
 
     override fun onBind(intent: Intent?) = null
 
-    /**
-     * The manifest declares foregroundServiceType="microphone|camera" since
-     * this single service can run in either mode. But on Android 10+, if
-     * startForeground() is called WITHOUT an explicit type, the system
-     * demands every type listed in the manifest be satisfied - meaning
-     * Motion mode (which needs neither permission) would still require both
-     * mic and camera permissions and crash. Passing the explicit type here
-     * for each mode avoids that.
-     */
     private fun startForegroundForMode(mode: String) {
         val notification = buildNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -144,9 +131,6 @@ class VoiceListenerService : Service() {
             am.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
         }
         if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-            // Not fatal - listening still works without ducking, media just
-            // won't get quieter while we're listening. Log it so a "why
-            // isn't ducking happening" report is traceable.
             Log.w(TAG, "Audio focus request denied (result=$result) - continuing without ducking")
         }
     }
@@ -212,6 +196,9 @@ class VoiceListenerService : Service() {
                     android.widget.Toast.LENGTH_LONG
                 ).show()
             }
+        )
+        handGestureDetector?.start()
+    }
 
     private fun startListening() {
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
@@ -228,10 +215,6 @@ class VoiceListenerService : Service() {
                 }
 
                 override fun onPartialResults(partialResults: Bundle?) {
-                    // Intentionally not matched on - a partial mid-sentence
-                    // guess can false-match a keyword and consume the
-                    // debounce window, blocking the real command that
-                    // follows. Only final results are trusted.
                 }
 
                 override fun onError(error: Int) {
@@ -267,7 +250,7 @@ class VoiceListenerService : Service() {
     private fun handleResults(results: Bundle?) {
         val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: return
         val now = System.currentTimeMillis()
-        if (now - lastCommandTime < 1200) return // debounce partial + final firing twice
+        if (now - lastCommandTime < 1200) return
 
         for (phrase in matches) {
             val lower = phrase.lowercase()
