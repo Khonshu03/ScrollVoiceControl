@@ -76,6 +76,11 @@ class HandGestureDetector(
         private const val MIN_GESTURE_DURATION_MS = 60L
         private const val COOLDOWN_MS = 550L
 
+        // How still (max movement, normalized units) and for how long the
+        // finger must hold after a fire before the next swipe can be armed.
+        private const val SETTLE_STILL_THRESHOLD = 0.035f
+        private const val SETTLE_HOLD_MS = 150L
+
         private const val POINTING_LOSS_GRACE_MS = 220L
 
         private const val INVERT_DIRECTION = false
@@ -147,6 +152,16 @@ class HandGestureDetector(
     private var refSetTime = 0L
     private var lastPointingTrueTime = 0L
     private var lastFireTime = 0L
+    // After a fire, the finger is almost always still coasting through the
+    // swipe motion (or about to recoil back toward its start). Re-arming
+    // refY off that in-motion position was causing one long swipe to cross
+    // the threshold twice (double scroll) and the post-swipe recoil to read
+    // as a small opposite-direction swipe (scrolls up right after down). So
+    // instead of re-arming immediately, wait for the finger to actually
+    // hold still for SETTLE_HOLD_MS before establishing the next refY.
+    private var awaitingSettle = false
+    private var settleAnchorY: Float? = null
+    private var settleAnchorTime = 0L
     private var smoothedX: Float? = null
     private var smoothedY: Float? = null
 
@@ -492,6 +507,21 @@ class HandGestureDetector(
         lastPointingTrueTime = now
         postCursorUpdate(now)
 
+        if (awaitingSettle) {
+            val anchor = settleAnchorY
+            if (anchor == null || kotlin.math.abs(displayY - anchor) > SETTLE_STILL_THRESHOLD) {
+                // Still moving (coasting through the swipe or recoiling back) - keep waiting.
+                settleAnchorY = displayY
+                settleAnchorTime = now
+            } else if (now - settleAnchorTime >= SETTLE_HOLD_MS) {
+                // Held still long enough - safe to arm the next swipe from here.
+                awaitingSettle = false
+                refY = displayY
+                refSetTime = now
+            }
+            return
+        }
+
         val currentRef = refY
         if (currentRef == null) {
             refY = displayY
@@ -506,8 +536,10 @@ class HandGestureDetector(
         val threshold = if (delta < 0) MIN_SWIPE_DELTA_DOWN else MIN_SWIPE_DELTA_UP
         if (!inCooldown && duration >= MIN_GESTURE_DURATION_MS && kotlin.math.abs(delta) >= threshold) {
             fire(delta, now)
-            refY = displayY
-            refSetTime = now
+            refY = null
+            awaitingSettle = true
+            settleAnchorY = displayY
+            settleAnchorTime = now
         }
     }
 
@@ -525,6 +557,10 @@ class HandGestureDetector(
         val now = System.currentTimeMillis()
         if (refY != null && now - lastPointingTrueTime > POINTING_LOSS_GRACE_MS) {
             refY = null
+        }
+        if (awaitingSettle && now - lastPointingTrueTime > POINTING_LOSS_GRACE_MS) {
+            awaitingSettle = false
+            settleAnchorY = null
         }
     }
 
