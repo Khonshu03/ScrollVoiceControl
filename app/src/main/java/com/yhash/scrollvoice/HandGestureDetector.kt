@@ -117,13 +117,22 @@ class HandGestureDetector(
         // genuine pinch, lower if it fires too easily.
         private const val KISS_PINCH_RATIO = 0.35
 
-        // Pose must be held this long before it counts, so a hand merely
-        // passing through a pinch-like shape mid-gesture doesn't trigger it.
-        private const val KISS_MIN_HOLD_MS = 120L
-        private const val KISS_COOLDOWN_MS = 900L
+        // The play/pause toggle no longer fires off the kiss pose alone -
+        // that fired instantly any time the hand happened to pass through a
+        // pinch shape (closing a fist, adjusting grip, etc). It now
+        // requires a deliberate two-phase gesture: hold an open palm, then
+        // fold it into a kiss (fires "pause"), or hold a kiss, then open
+        // the palm back up (fires "play"). Both phases must be held for
+        // POSE_HOLD_MS to count as "confirmed", so a hand merely passing
+        // through either shape mid-motion doesn't trigger anything. Raised
+        // from 120ms - that was short enough that an open palm glimpsed for
+        // a couple frames while your hand was just moving through the shot
+        // (not deliberately held) still counted as "confirmed".
+        private const val POSE_HOLD_MS = 350L
+        private const val TOGGLE_COOLDOWN_MS = 900L
         // Same idea as POINTING_LOSS_GRACE_MS - tolerates a brief tracking
-        // blip without treating the pose as having ended.
-        private const val KISS_LOSS_GRACE_MS = 150L
+        // blip without resetting the in-progress open<->kiss sequence.
+        private const val POSE_LOSS_GRACE_MS = 150L
     }
 
     private var executor: ExecutorService = Executors.newSingleThreadExecutor()
@@ -141,12 +150,17 @@ class HandGestureDetector(
     private var smoothedX: Float? = null
     private var smoothedY: Float? = null
 
-    // Kiss-pose (play/pause toggle) state, separate from the pointing/swipe
-    // state above since the two gestures are mutually exclusive per frame.
-    private var kissPoseStartTime = 0L
-    private var lastKissTrueTime = 0L
-    private var kissFiredThisPose = false
-    private var lastKissFireTime = 0L
+    // Open-palm <-> kiss-pose (play/pause toggle) state machine, separate
+    // from the pointing/swipe state above since these gestures are mutually
+    // exclusive with pointing per frame.
+    private enum class Pose { NONE, OPEN, KISS }
+    // The last pose that was actually held long enough to "confirm".
+    private var confirmedPose = Pose.NONE
+    // The pose the hand currently looks like it's forming, mid-hold.
+    private var candidatePose = Pose.NONE
+    private var candidateStartTime = 0L
+    private var lastCandidateTrueTime = 0L
+    private var lastToggleFireTime = 0L
 
     // Reused across frames to avoid a fresh IntArray allocation every frame -
     // the Bitmap itself is still allocated fresh each frame (see
@@ -438,7 +452,7 @@ class HandGestureDetector(
 
         if (hands.isEmpty()) {
             maybeEndSession()
-            maybeEndKissSession(now)
+            maybeEndPoseSession(now)
             postCursorUpdate(now)
             return
         }
@@ -446,28 +460,20 @@ class HandGestureDetector(
         val landmarks = hands[0]
         val wrist = landmarks[WRIST]
 
-        if (isKissPose(landmarks)) {
-            handleKissPose(now)
-            // Kiss and pointing are mutually exclusive per frame - a fist-
-            // like pinch isn't also a point, so don't fall through.
+        val poseNow = classifyPose(landmarks, wrist)
+        if (poseNow != Pose.NONE) {
+            handlePoseFrame(poseNow, now)
+            // Open palm and kiss are mutually exclusive with pointing per
+            // frame, so don't fall through to the swipe logic below.
             postCursorUpdate(now)
             return
-        } else {
-            maybeEndKissSession(now)
         }
+        maybeEndPoseSession(now)
 
-        fun extended(tipIdx: Int, pipIdx: Int): Boolean {
-            val tip = landmarks[tipIdx]
-            val pip = landmarks[pipIdx]
-            val tipDist = hypot((tip.x() - wrist.x()).toDouble(), (tip.y() - wrist.y()).toDouble())
-            val pipDist = hypot((pip.x() - wrist.x()).toDouble(), (pip.y() - wrist.y()).toDouble())
-            return tipDist > pipDist * EXTENDED_RATIO
-        }
-
-        val indexExtended = extended(INDEX_TIP, INDEX_PIP)
-        val middleExtended = extended(MIDDLE_TIP, MIDDLE_PIP)
-        val ringExtended = extended(RING_TIP, RING_PIP)
-        val pinkyExtended = extended(PINKY_TIP, PINKY_PIP)
+        val indexExtended = extendedFinger(landmarks, wrist, INDEX_TIP, INDEX_PIP)
+        val middleExtended = extendedFinger(landmarks, wrist, MIDDLE_TIP, MIDDLE_PIP)
+        val ringExtended = extendedFinger(landmarks, wrist, RING_TIP, RING_PIP)
+        val pinkyExtended = extendedFinger(landmarks, wrist, PINKY_TIP, PINKY_PIP)
         val isPointing = indexExtended && !middleExtended && !ringExtended && !pinkyExtended
 
         val tip = landmarks[INDEX_TIP]
@@ -531,14 +537,30 @@ class HandGestureDetector(
         mainHandler.post { onSwipe(direction) }
     }
 
+    /** Whether a single finger is straightened (tip far from wrist relative to its own PIP knuckle). */
+    private fun extendedFinger(
+        landmarks: List<com.google.mediapipe.tasks.components.containers.NormalizedLandmark>,
+        wrist: com.google.mediapipe.tasks.components.containers.NormalizedLandmark,
+        tipIdx: Int,
+        pipIdx: Int
+    ): Boolean {
+        val tip = landmarks[tipIdx]
+        val pip = landmarks[pipIdx]
+        val tipDist = hypot((tip.x() - wrist.x()).toDouble(), (tip.y() - wrist.y()).toDouble())
+        val pipDist = hypot((pip.x() - wrist.x()).toDouble(), (pip.y() - wrist.y()).toDouble())
+        return tipDist > pipDist * EXTENDED_RATIO
+    }
+
     /**
      * "Chef's kiss" pose: all five fingertips pinched together to a point.
      * Detected as the average fingertip-to-centroid distance, normalized by
      * palm size (wrist-to-middle-knuckle) so it works at any distance from
      * the camera.
      */
-    private fun isKissPose(landmarks: List<com.google.mediapipe.tasks.components.containers.NormalizedLandmark>): Boolean {
-        val wrist = landmarks[WRIST]
+    private fun isKissPose(
+        landmarks: List<com.google.mediapipe.tasks.components.containers.NormalizedLandmark>,
+        wrist: com.google.mediapipe.tasks.components.containers.NormalizedLandmark
+    ): Boolean {
         val middleMcp = landmarks[MIDDLE_MCP]
         val palmSize = hypot((middleMcp.x() - wrist.x()).toDouble(), (middleMcp.y() - wrist.y()).toDouble())
         if (palmSize < 1e-4) return false
@@ -557,29 +579,67 @@ class HandGestureDetector(
         return (avgDist / palmSize) < KISS_PINCH_RATIO
     }
 
-    /** Tracks how long the kiss pose has been held and fires the toggle once per pose, not once per frame. */
-    private fun handleKissPose(now: Long) {
-        if (kissPoseStartTime == 0L) {
-            kissPoseStartTime = now
-            kissFiredThisPose = false
-        }
-        lastKissTrueTime = now
-
-        val held = now - kissPoseStartTime
-        val inCooldown = now - lastKissFireTime < KISS_COOLDOWN_MS
-        if (!kissFiredThisPose && !inCooldown && held >= KISS_MIN_HOLD_MS) {
-            kissFiredThisPose = true
-            lastKissFireTime = now
-            Log.d(TAG, "Kiss pose held ${held}ms -> play/pause toggle")
-            mainHandler.post { onSwipe("toggle") }
-        }
+    /**
+     * Open-palm pose: the four fingers (thumb excluded, since its extension
+     * geometry relative to the wrist is different) all straightened out -
+     * i.e. the opposite shape from the kiss pinch above.
+     */
+    private fun isOpenPalm(
+        landmarks: List<com.google.mediapipe.tasks.components.containers.NormalizedLandmark>,
+        wrist: com.google.mediapipe.tasks.components.containers.NormalizedLandmark
+    ): Boolean {
+        return extendedFinger(landmarks, wrist, INDEX_TIP, INDEX_PIP) &&
+            extendedFinger(landmarks, wrist, MIDDLE_TIP, MIDDLE_PIP) &&
+            extendedFinger(landmarks, wrist, RING_TIP, RING_PIP) &&
+            extendedFinger(landmarks, wrist, PINKY_TIP, PINKY_PIP)
     }
 
-    /** Resets the kiss-pose session once the pose has been absent for longer than the grace period. */
-    private fun maybeEndKissSession(now: Long) {
-        if (kissPoseStartTime != 0L && now - lastKissTrueTime > KISS_LOSS_GRACE_MS) {
-            kissPoseStartTime = 0L
-            kissFiredThisPose = false
+    private fun classifyPose(
+        landmarks: List<com.google.mediapipe.tasks.components.containers.NormalizedLandmark>,
+        wrist: com.google.mediapipe.tasks.components.containers.NormalizedLandmark
+    ): Pose = when {
+        isKissPose(landmarks, wrist) -> Pose.KISS
+        isOpenPalm(landmarks, wrist) -> Pose.OPEN
+        else -> Pose.NONE
+    }
+
+    /**
+     * Tracks the open-palm <-> kiss sequence and fires the play/pause toggle
+     * only on a confirmed transition between the two - open held, then
+     * folded into a kiss (pause), or kiss held, then opened back up (play).
+     * Landing on the same pose twice in a row (e.g. open, briefly lost,
+     * open again) does not refire.
+     */
+    private fun handlePoseFrame(poseNow: Pose, now: Long) {
+        if (poseNow != candidatePose) {
+            candidatePose = poseNow
+            candidateStartTime = now
+        }
+        lastCandidateTrueTime = now
+
+        val held = now - candidateStartTime
+        if (held < POSE_HOLD_MS || candidatePose == confirmedPose) return
+
+        val previousConfirmed = confirmedPose
+        confirmedPose = candidatePose
+
+        val isOpenToKiss = previousConfirmed == Pose.OPEN && confirmedPose == Pose.KISS
+        val isKissToOpen = previousConfirmed == Pose.KISS && confirmedPose == Pose.OPEN
+        if (!isOpenToKiss && !isKissToOpen) return
+
+        if (now - lastToggleFireTime < TOGGLE_COOLDOWN_MS) return
+
+        lastToggleFireTime = now
+        val label = if (isOpenToKiss) "open hand -> kiss (pause)" else "kiss -> open hand (play)"
+        Log.d(TAG, "Pose transition: $label")
+        mainHandler.post { onSwipe("toggle") }
+    }
+
+    /** Resets the open/kiss sequence once no recognized pose has been seen for longer than the grace period. */
+    private fun maybeEndPoseSession(now: Long) {
+        if (candidatePose != Pose.NONE && now - lastCandidateTrueTime > POSE_LOSS_GRACE_MS) {
+            candidatePose = Pose.NONE
+            confirmedPose = Pose.NONE
         }
     }
 
