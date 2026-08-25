@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Soft outer glow ring -->
+    <item android:width="24dp" android:height="24dp" android:gravity="center">
+        <shape android:shape="oval">
+            <gradient
+                android:type="radial"
+                android:gradientRadius="12dp"
+                android:centerColor="@color/status_on_glow"
+                android:endColor="#00000000" />
+        </shape>
+    </item>
+    <!-- Solid core dot -->
+    <item android:width="10dp" android:height="10dp" android:gravity="center">
+        <shape android:shape="oval">
+            <solid android:color="@color/status_on" />
+        </shape>
+    </item>
+</layer-list>
