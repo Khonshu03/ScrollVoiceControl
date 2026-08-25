@@ -30,13 +30,13 @@ class VoiceListenerService : Service() {
         const val MODE_CLAP = "clap"
         const val MODE_CAMERA = "camera"
 
-        private val COMMANDS = mapOf(
+        private val COMMAND_PATTERNS: List<Pair<Regex, String>> = listOf(
             "down" to "down",
             "next" to "down",
             "up" to "up",
             "back" to "back",
             "previous" to "up"
-        )
+        ).map { (keyword, direction) -> Regex("\\b${Regex.escape(keyword)}\\b") to direction }
     }
 
     private var speechRecognizer: SpeechRecognizer? = null
@@ -45,6 +45,7 @@ class VoiceListenerService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var isRunning = false
     private var mode = MODE_VOICE
+    private var activeMode: String? = null
     private var lastCommandTime = 0L
 
     private var audioManager: AudioManager? = null
@@ -67,8 +68,10 @@ class VoiceListenerService : Service() {
         }
         startForegroundForMode(mode)
         startOverlay()
-        if (!isRunning) {
+        if (!isRunning || mode != activeMode) {
+            stopActiveDetectors()
             isRunning = true
+            activeMode = mode
             when (mode) {
                 MODE_CLAP -> {
                     requestDucking()
@@ -84,8 +87,7 @@ class VoiceListenerService : Service() {
         return START_STICKY
     }
 
-    override fun onDestroy() {
-        isRunning = false
+    private fun stopActiveDetectors() {
         speechRecognizer?.destroy()
         speechRecognizer = null
         clapDetector?.stop()
@@ -93,6 +95,12 @@ class VoiceListenerService : Service() {
         handGestureDetector?.stop()
         handGestureDetector = null
         abandonDucking()
+    }
+
+    override fun onDestroy() {
+        isRunning = false
+        activeMode = null
+        stopActiveDetectors()
         stopOverlay()
         super.onDestroy()
     }
@@ -254,8 +262,8 @@ class VoiceListenerService : Service() {
 
         for (phrase in matches) {
             val lower = phrase.lowercase()
-            for ((keyword, direction) in COMMANDS) {
-                if (lower.contains(keyword)) {
+            for ((pattern, direction) in COMMAND_PATTERNS) {
+                if (pattern.containsMatchIn(lower)) {
                     Log.d(TAG, "Command recognized: '$phrase' -> $direction")
                     lastCommandTime = now
                     ScrollAccessibilityService.instance?.performScroll(direction)

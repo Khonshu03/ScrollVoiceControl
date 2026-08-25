@@ -2,11 +2,7 @@ package com.yhash.scrollvoice
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.ImageFormat
 import android.graphics.Matrix
-import android.graphics.Rect
-import android.graphics.YuvImage
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -26,7 +22,6 @@ import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
 import java.io.File
 import java.io.FileOutputStream
-import java.io.ByteArrayOutputStream
 import java.net.URL
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -34,15 +29,27 @@ import kotlin.math.hypot
 
 /**
  * Real hand-skeleton tracking using MediaPipe's Hand Landmarker (21 points
- * per hand, the same technology behind Google's own hand-tracking demos) -
- * not a brightness-motion guess. Specifically looks for a pointing gesture
+ * per hand) - not a brightness-motion guess. Looks for a pointing gesture
  * (index finger extended, other fingers curled) and tracks that fingertip's
  * position. Swipe the pointing finger up/down in front of the camera to
- * scroll; the fingertip position also drives the on-screen cursor so you
- * can see what it's tracking.
+ * scroll; the fingertip position also drives the on-screen cursor.
  *
  * The ~7MB model file isn't bundled in the app - it's downloaded once from
  * Google's public model server on first use and cached in app storage.
+ *
+ * Two reliability layers on top of the base detector, both aimed at the
+ * "works once, then stops working after a while" failure mode:
+ *  - Frame conversion is done with direct YUV->RGB pixel math instead of a
+ *    JPEG encode/decode roundtrip, which was by far the most expensive
+ *    thing happening every single frame, continuously, for however long the
+ *    mode stays on. Long sessions were almost certainly degrading from the
+ *    sustained allocation/compression churn.
+ *  - A watchdog checks that the full pipeline (camera -> conversion ->
+ *    MediaPipe inference -> result callback) is still actually producing
+ *    results every few seconds. If it goes quiet - camera silently lost,
+ *    MediaPipe wedged, whatever the cause - it tears the whole pipeline
+ *    down and rebuilds it from scratch, the same "calibration test" you'd
+ *    do by hand by toggling the mode off and on, just automatic.
  */
 class HandGestureDetector(
     private val context: Context,
@@ -64,35 +71,32 @@ class HandGestureDetector(
         // times farther from the wrist than its own PIP knuckle.
         private const val EXTENDED_RATIO = 1.15
 
-        // "up" (finger moving down toward you) needs less travel than "down"
-        // (finger moving up away from you) - your hand naturally has less
-        // room to move downward toward your body than upward away from it,
-        // so an equal threshold makes "up" feel less reliable in practice.
         private const val MIN_SWIPE_DELTA_DOWN = 0.12f // finger rises (Y decreases)
         private const val MIN_SWIPE_DELTA_UP = 0.08f   // finger drops (Y increases)
         private const val MIN_GESTURE_DURATION_MS = 60L
         private const val COOLDOWN_MS = 550L
 
-        // Fast swipes cause motion blur, which can make MediaPipe briefly
-        // lose clean landmarks mid-gesture. Tolerate a short gap in
-        // "pointing" detection before treating the gesture as actually over.
         private const val POINTING_LOSS_GRACE_MS = 220L
 
         private const val INVERT_DIRECTION = false
-        private const val MIRROR_X = true // front camera: flip so cursor moves the way it feels natural
+        private const val MIRROR_X = true
 
-        // Smooths the cursor's on-screen position only - the raw (unsmoothed)
-        // position still drives swipe detection below, so this doesn't dull
-        // gesture responsiveness, it just stops the dot from jittering.
         private const val CURSOR_SMOOTHING = 0.35f
 
-        // Camera hardware sometimes hasn't finished releasing from a
-        // previous session yet - retry a couple times with a short delay
-        // instead of giving up on the first failure.
         private const val MAX_CAMERA_RETRIES = 3
         private const val CAMERA_RETRY_DELAY_MS = 500L
 
-        // Standard MediaPipe hand landmark indices.
+        // Watchdog: how often to check the pipeline is still alive, and how
+        // long a silence has to last before we treat it as stalled rather
+        // than just a slow moment (hand out of frame, brief exposure
+        // adjustment, etc).
+        private const val WATCHDOG_INTERVAL_MS = 6000L
+        private const val STALL_TIMEOUT_MS = 10000L
+
+        // Frame processing failures (including OOM) in a row before we
+        // treat the pipeline as broken rather than just having a bad frame.
+        private const val MAX_CONSECUTIVE_FRAME_FAILURES = 8
+
         private const val WRIST = 0
         private const val INDEX_PIP = 6
         private const val INDEX_TIP = 8
@@ -104,12 +108,13 @@ class HandGestureDetector(
         private const val PINKY_TIP = 20
     }
 
-    private val executor: ExecutorService = Executors.newSingleThreadExecutor()
+    private var executor: ExecutorService = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var cameraProvider: ProcessCameraProvider? = null
     private val lifecycleOwner = SimpleLifecycleOwner()
     private var handLandmarker: HandLandmarker? = null
     private var stopped = false
+    @Volatile private var restarting = false
 
     private var refY: Float? = null
     private var refSetTime = 0L
@@ -118,8 +123,64 @@ class HandGestureDetector(
     private var smoothedX: Float? = null
     private var smoothedY: Float? = null
 
+    // Reused across frames to avoid a fresh IntArray allocation every frame -
+    // the Bitmap itself is still allocated fresh each frame (see
+    // imageProxyToBitmap) since MediaPipe's LIVE_STREAM mode consumes it
+    // asynchronously and mutating a Bitmap MediaPipe hasn't finished reading
+    // yet would be a real race, not just a performance nit.
+    private var pixelBuffer: IntArray? = null
+
+    @Volatile private var lastResultTime = 0L
+    @Volatile private var consecutiveFrameFailures = 0
+
+    private val watchdog = object : Runnable {
+        override fun run() {
+            if (stopped) return
+            val last = lastResultTime
+            if (last != 0L && System.currentTimeMillis() - last > STALL_TIMEOUT_MS) {
+                Log.w(TAG, "No hand-tracking results for ${STALL_TIMEOUT_MS}ms - rebuilding pipeline")
+                restartPipeline()
+            }
+            mainHandler.postDelayed(this, WATCHDOG_INTERVAL_MS)
+        }
+    }
+
     fun start() {
         stopped = false
+        restarting = false
+        if (executor.isShutdown) {
+            executor = Executors.newSingleThreadExecutor()
+        }
+        initPipeline()
+        mainHandler.removeCallbacks(watchdog)
+        mainHandler.postDelayed(watchdog, WATCHDOG_INTERVAL_MS)
+    }
+
+    fun stop() {
+        stopped = true
+        restarting = false
+        mainHandler.removeCallbacks(watchdog)
+        refY = null
+        smoothedX = null
+        smoothedY = null
+        lastResultTime = 0L
+        mainHandler.post {
+            cameraProvider?.unbindAll()
+            cameraProvider = null
+            lifecycleOwner.stop()
+        }
+        executor.execute {
+            try {
+                handLandmarker?.close()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error closing landmarker", e)
+            }
+            handLandmarker = null
+        }
+        executor.shutdown()
+    }
+
+    private fun initPipeline() {
         executor.execute {
             try {
                 val modelFile = ensureModelDownloaded()
@@ -137,21 +198,50 @@ class HandGestureDetector(
         }
     }
 
-    fun stop() {
-        stopped = true
-        refY = null
-        smoothedX = null
-        smoothedY = null
-        mainHandler.post {
-            cameraProvider?.unbindAll()
-            cameraProvider = null
-            lifecycleOwner.stop()
-        }
+    /**
+     * Full teardown + rebuild of the entire pipeline: closes the old
+     * HandLandmarker, unbinds the camera, then reinitializes both from
+     * scratch. This is the automatic version of "turn camera mode off and
+     * on again" - triggered by the watchdog when results have stopped
+     * coming in for too long.
+     */
+    private fun restartPipeline() {
+        if (restarting || stopped) return
+        restarting = true
+        onError?.invoke() // visible red flash while recovering
+
+        cameraProvider?.unbindAll()
+        cameraProvider = null
+        lifecycleOwner.stop()
+
         executor.execute {
-            handLandmarker?.close()
+            try {
+                handLandmarker?.close()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error closing landmarker during restart", e)
+            }
             handLandmarker = null
+
+            try {
+                val modelFile = ensureModelDownloaded()
+                val landmarker = buildLandmarker(modelFile)
+                if (stopped) {
+                    landmarker.close()
+                    return@execute
+                }
+                handLandmarker = landmarker
+                lastResultTime = 0L
+                consecutiveFrameFailures = 0
+                mainHandler.post {
+                    restarting = false
+                    if (!stopped) startCamera()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to rebuild hand tracking pipeline", e)
+                restarting = false
+                mainHandler.post { onError?.invoke() }
+            }
         }
-        executor.shutdown()
     }
 
     private fun ensureModelDownloaded(): File {
@@ -212,10 +302,6 @@ class HandGestureDetector(
                 )
                 Log.d(TAG, "Camera bound successfully (attempt $attempt)")
             } catch (e: Exception) {
-                // The camera hardware doesn't always finish releasing
-                // instantly after a previous session ends - retrying after
-                // a short delay resolves most "works once, then fails"
-                // camera issues on Android without any user-visible impact.
                 Log.w(TAG, "Camera bind failed on attempt $attempt: ${e.message}")
                 if (attempt < MAX_CAMERA_RETRIES && !stopped) {
                     mainHandler.postDelayed({ startCamera(attempt + 1) }, CAMERA_RETRY_DELAY_MS)
@@ -233,33 +319,86 @@ class HandGestureDetector(
             if (bitmap != null) {
                 handLandmarker?.detectAsync(BitmapImageBuilder(bitmap).build(), System.currentTimeMillis())
             }
+            consecutiveFrameFailures = 0
+        } catch (e: OutOfMemoryError) {
+            // A regular Exception catch doesn't see this (Error, not
+            // Exception) - it used to crash the analyzer thread silently.
+            // Now it's logged and counted instead of just vanishing.
+            Log.e(TAG, "Out of memory converting a frame - skipping it", e)
+            handleFrameFailure()
         } catch (e: Exception) {
             Log.e(TAG, "Frame analysis error", e)
+            handleFrameFailure()
         } finally {
             image.close()
         }
     }
 
-    /** Converts a YUV_420_888 camera frame to an upright RGB Bitmap. */
+    private fun handleFrameFailure() {
+        consecutiveFrameFailures++
+        if (consecutiveFrameFailures >= MAX_CONSECUTIVE_FRAME_FAILURES) {
+            Log.w(TAG, "$consecutiveFrameFailures consecutive frame failures - rebuilding pipeline")
+            consecutiveFrameFailures = 0
+            mainHandler.post { restartPipeline() }
+        }
+    }
+
+    /**
+     * Converts a YUV_420_888 camera frame to an upright RGB Bitmap using
+     * direct pixel math, not a JPEG encode/decode roundtrip. The pixel
+     * IntArray is reused across frames since setPixels() copies its values
+     * into the Bitmap's own storage synchronously - safe to overwrite on
+     * the next frame. The Bitmap itself is still allocated fresh each frame
+     * on purpose (see class doc).
+     */
     private fun imageProxyToBitmap(image: ImageProxy): Bitmap? {
+        val width = image.width
+        val height = image.height
+
         val yPlane = image.planes[0]
         val uPlane = image.planes[1]
         val vPlane = image.planes[2]
 
-        val ySize = yPlane.buffer.remaining()
-        val uSize = uPlane.buffer.remaining()
-        val vSize = vPlane.buffer.remaining()
-        val nv21 = ByteArray(ySize + uSize + vSize)
+        val yBuffer = yPlane.buffer
+        val uBuffer = uPlane.buffer
+        val vBuffer = vPlane.buffer
 
-        yPlane.buffer.get(nv21, 0, ySize)
-        vPlane.buffer.get(nv21, ySize, vSize)
-        uPlane.buffer.get(nv21, ySize + vSize, uSize)
+        val yRowStride = yPlane.rowStride
+        val uvRowStride = uPlane.rowStride
+        val uvPixelStride = uPlane.pixelStride
 
-        val yuvImage = YuvImage(nv21, ImageFormat.NV21, image.width, image.height, null)
-        val out = ByteArrayOutputStream()
-        yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), 80, out)
-        val bytes = out.toByteArray()
-        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+        val pixelCount = width * height
+        var pixels = pixelBuffer
+        if (pixels == null || pixels.size != pixelCount) {
+            pixels = IntArray(pixelCount)
+            pixelBuffer = pixels
+        }
+
+        for (row in 0 until height) {
+            val yRowStart = row * yRowStride
+            val uvRowStart = (row / 2) * uvRowStride
+            for (col in 0 until width) {
+                val yValue = yBuffer.get(yRowStart + col).toInt() and 0xFF
+
+                val uvIndex = uvRowStart + (col / 2) * uvPixelStride
+                val uValue = (uBuffer.get(uvIndex).toInt() and 0xFF) - 128
+                val vValue = (vBuffer.get(uvIndex).toInt() and 0xFF) - 128
+
+                val y1192 = 1192 * (yValue - 16)
+                var r = (y1192 + 1634 * vValue) shr 10
+                var g = (y1192 - 833 * vValue - 400 * uValue) shr 10
+                var b = (y1192 + 2066 * uValue) shr 10
+
+                if (r < 0) r = 0 else if (r > 255) r = 255
+                if (g < 0) g = 0 else if (g > 255) g = 255
+                if (b < 0) b = 0 else if (b > 255) b = 255
+
+                pixels[row * width + col] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+            }
+        }
+
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
 
         val rotation = image.imageInfo.rotationDegrees
         if (rotation == 0) return bitmap
@@ -268,8 +407,9 @@ class HandGestureDetector(
     }
 
     private fun handleResult(result: HandLandmarkerResult) {
+        lastResultTime = System.currentTimeMillis()
         val hands = result.landmarks()
-        val now = System.currentTimeMillis()
+        val now = lastResultTime
 
         if (hands.isEmpty()) {
             maybeEndSession()
@@ -299,8 +439,6 @@ class HandGestureDetector(
         val displayX = if (MIRROR_X) 1f - rawX else rawX
         val displayY = tip.y()
 
-        // Smooth only the cursor's visual position - gesture math below
-        // keeps using the raw displayY so swipe sensitivity stays sharp.
         smoothedX = lerp(smoothedX, displayX)
         smoothedY = lerp(smoothedY, displayY)
 
@@ -314,7 +452,6 @@ class HandGestureDetector(
 
         val currentRef = refY
         if (currentRef == null) {
-            // First frame of a new pointing session - establish baseline.
             refY = displayY
             refSetTime = now
             return
@@ -327,10 +464,6 @@ class HandGestureDetector(
         val threshold = if (delta < 0) MIN_SWIPE_DELTA_DOWN else MIN_SWIPE_DELTA_UP
         if (!inCooldown && duration >= MIN_GESTURE_DURATION_MS && kotlin.math.abs(delta) >= threshold) {
             fire(delta, now)
-            // Reset baseline to current position immediately, so the
-            // natural "bring hand back down" motion after a swipe needs
-            // its own full-size movement to count as a new gesture,
-            // instead of the retract itself being read as the opposite swipe.
             refY = displayY
             refSetTime = now
         }
@@ -339,11 +472,6 @@ class HandGestureDetector(
     private fun lerp(current: Float?, target: Float): Float =
         if (current == null) target else current + (target - current) * CURSOR_SMOOTHING
 
-    /**
-     * The cursor stays visible as long as pointing was seen recently (within
-     * the grace window), even if this exact frame lost clean tracking -
-     * this is what stops the dot from blinking out during fast motion.
-     */
     private fun postCursorUpdate(now: Long) {
         val displayPointing = now - lastPointingTrueTime <= POINTING_LOSS_GRACE_MS
         val x = smoothedX ?: 0.5f
@@ -351,7 +479,6 @@ class HandGestureDetector(
         mainHandler.post { onPositionUpdate?.invoke(x, y, displayPointing) }
     }
 
-    /** Ends the current pointing session once the loss has outlasted the motion-blur grace period. */
     private fun maybeEndSession() {
         val now = System.currentTimeMillis()
         if (refY != null && now - lastPointingTrueTime > POINTING_LOSS_GRACE_MS) {
@@ -360,8 +487,6 @@ class HandGestureDetector(
     }
 
     private fun fire(delta: Float, now: Long) {
-        // Fingertip Y decreasing = moved toward top of frame = swipe upward,
-        // which matches Reels/TikTok's physical "swipe up for next" motion.
         var direction = if (delta < 0) "down" else "up"
         if (INVERT_DIRECTION) direction = if (direction == "down") "up" else "down"
 
