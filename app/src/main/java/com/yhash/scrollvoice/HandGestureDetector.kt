@@ -76,10 +76,22 @@ class HandGestureDetector(
         private const val MIN_GESTURE_DURATION_MS = 60L
         private const val COOLDOWN_MS = 550L
 
-        // How still (max movement, normalized units) and for how long the
+        // How still (max net movement, normalized units) and for how long the
         // finger must hold after a fire before the next swipe can be armed.
-        private const val SETTLE_STILL_THRESHOLD = 0.035f
-        private const val SETTLE_HOLD_MS = 150L
+        // Tightened from 0.035/150ms: that was loose enough that a real
+        // swipe's natural mid-motion deceleration (which isn't a full stop)
+        // could still read as "settled," re-arming a new reference point
+        // before the swipe's momentum had actually finished - letting one
+        // continuous swipe cross the threshold twice (double scroll).
+        private const val SETTLE_STILL_THRESHOLD = 0.02f
+        private const val SETTLE_HOLD_MS = 250L
+
+        // Extra scrutiny for a fire whose direction is the *opposite* of the
+        // one that just fired. A deliberate direction change covers real
+        // distance; a hand recoiling/relaxing right after a swipe usually
+        // doesn't, so require more movement to accept it during this window.
+        private const val OPPOSITE_DIRECTION_WINDOW_MS = 900L
+        private const val OPPOSITE_DIRECTION_THRESHOLD_MULTIPLIER = 1.7f
 
         private const val POINTING_LOSS_GRACE_MS = 220L
 
@@ -152,6 +164,9 @@ class HandGestureDetector(
     private var refSetTime = 0L
     private var lastPointingTrueTime = 0L
     private var lastFireTime = 0L
+    // Direction of the last fired swipe (true = "down"), used for the
+    // opposite-direction hysteresis check above.
+    private var lastFireWasDown: Boolean? = null
     // After a fire, the finger is almost always still coasting through the
     // swipe motion (or about to recoil back toward its start). Re-arming
     // refY off that in-motion position was causing one long swipe to cross
@@ -533,9 +548,20 @@ class HandGestureDetector(
         val delta = displayY - currentRef
         val inCooldown = now - lastFireTime < COOLDOWN_MS
 
-        val threshold = if (delta < 0) MIN_SWIPE_DELTA_DOWN else MIN_SWIPE_DELTA_UP
+        val candidateIsDown = delta < 0
+        val baseThreshold = if (candidateIsDown) MIN_SWIPE_DELTA_DOWN else MIN_SWIPE_DELTA_UP
+        val isOppositeOfLastFire = lastFireWasDown != null &&
+            lastFireWasDown != candidateIsDown &&
+            (now - lastFireTime) < OPPOSITE_DIRECTION_WINDOW_MS
+        val threshold = if (isOppositeOfLastFire) {
+            baseThreshold * OPPOSITE_DIRECTION_THRESHOLD_MULTIPLIER
+        } else {
+            baseThreshold
+        }
+
         if (!inCooldown && duration >= MIN_GESTURE_DURATION_MS && kotlin.math.abs(delta) >= threshold) {
             fire(delta, now)
+            lastFireWasDown = candidateIsDown
             refY = null
             awaitingSettle = true
             settleAnchorY = displayY
