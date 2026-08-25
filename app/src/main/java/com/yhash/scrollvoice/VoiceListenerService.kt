@@ -176,7 +176,7 @@ class VoiceListenerService : Service() {
                 }
                 if (direction != null) {
                     Log.d(TAG, "Clap burst: $count -> $direction")
-                    ScrollAccessibilityService.instance?.performScroll(direction)
+                    ScrollAccessibilityService.instance?.performAction(direction)
                     OverlayService.instance?.pulse()
                 }
             },
@@ -190,7 +190,7 @@ class VoiceListenerService : Service() {
             context = this,
             onSwipe = { direction ->
                 Log.d(TAG, "Camera swipe -> $direction")
-                ScrollAccessibilityService.instance?.performScroll(direction)
+                ScrollAccessibilityService.instance?.performAction(direction)
                 OverlayService.instance?.pulse()
             },
             onPositionUpdate = { x, y, pointing ->
@@ -266,7 +266,7 @@ class VoiceListenerService : Service() {
                 if (pattern.containsMatchIn(lower)) {
                     Log.d(TAG, "Command recognized: '$phrase' -> $direction")
                     lastCommandTime = now
-                    ScrollAccessibilityService.instance?.performScroll(direction)
+                    ScrollAccessibilityService.instance?.performAction(direction)
                     OverlayService.instance?.pulse()
                     return
                 }

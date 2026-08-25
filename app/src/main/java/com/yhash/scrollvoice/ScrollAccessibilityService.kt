@@ -17,6 +17,7 @@ class ScrollAccessibilityService : AccessibilityService() {
     companion object {
         private const val TAG = "ScrollA11yService"
         private const val SWIPE_DURATION_MS = 300L
+        private const val TAP_DURATION_MS = 50L
 
         // Set when the service connects, cleared when it's destroyed.
         // VoiceListenerService calls into this to trigger gestures.
@@ -49,27 +50,19 @@ class ScrollAccessibilityService : AccessibilityService() {
 
     /**
      * direction: "down" = advance to next reel, "up" = go back to previous reel,
-     * "back" = perform system back action.
+     * "back" = perform system back action, "toggle" = tap center of screen
+     * to play/pause the current video.
      */
-    fun performScroll(direction: String) {
+    fun performAction(direction: String) {
         when (direction) {
             "down" -> swipe(fromBottomFraction = 0.75f, toTopFraction = 0.25f)
             "up" -> swipe(fromBottomFraction = 0.25f, toTopFraction = 0.75f)
             "back" -> performGlobalAction(GLOBAL_ACTION_BACK)
+            "toggle" -> tap()
         }
     }
 
     private fun swipe(fromBottomFraction: Float, toTopFraction: Float) {
-        if (gestureInFlight) {
-            // A previous swipe hasn't finished yet - dispatching now would
-            // just be silently rejected. Log it so it's at least visible
-            // why this particular command didn't do anything, instead of
-            // looking like a random miss.
-            Log.w(TAG, "Skipped swipe - previous gesture still in flight")
-            OverlayService.instance?.showError()
-            return
-        }
-
         val metrics: DisplayMetrics = resources.displayMetrics
         val centerX = metrics.widthPixels / 2f
         val startY = metrics.heightPixels * fromBottomFraction
@@ -79,9 +72,31 @@ class ScrollAccessibilityService : AccessibilityService() {
             moveTo(centerX, startY)
             lineTo(centerX, endY)
         }
+        dispatch(path, SWIPE_DURATION_MS, "swipe")
+    }
+
+    /** Single tap at the center of the screen - toggles play/pause on virtually every video player/feed. */
+    private fun tap() {
+        val metrics: DisplayMetrics = resources.displayMetrics
+        val path = Path().apply {
+            moveTo(metrics.widthPixels / 2f, metrics.heightPixels / 2f)
+        }
+        dispatch(path, TAP_DURATION_MS, "tap")
+    }
+
+    private fun dispatch(path: Path, durationMs: Long, label: String) {
+        if (gestureInFlight) {
+            // A previous gesture hasn't finished yet - dispatching now would
+            // just be silently rejected. Log it so it's at least visible
+            // why this particular command didn't do anything, instead of
+            // looking like a random miss.
+            Log.w(TAG, "Skipped $label - previous gesture still in flight")
+            OverlayService.instance?.showError()
+            return
+        }
 
         val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, SWIPE_DURATION_MS))
+            .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs))
             .build()
 
         gestureInFlight = true
@@ -93,7 +108,7 @@ class ScrollAccessibilityService : AccessibilityService() {
 
             override fun onCancelled(gestureDescription: GestureDescription?) {
                 gestureInFlight = false
-                Log.w(TAG, "Swipe gesture was cancelled by the system")
+                Log.w(TAG, "$label gesture was cancelled by the system")
                 OverlayService.instance?.showError()
             }
         }, null)
@@ -102,7 +117,7 @@ class ScrollAccessibilityService : AccessibilityService() {
             // dispatchGesture() returned false synchronously - it never
             // started at all (service not ready, screen off, etc).
             gestureInFlight = false
-            Log.w(TAG, "dispatchGesture() rejected the swipe")
+            Log.w(TAG, "dispatchGesture() rejected the $label")
             OverlayService.instance?.showError()
         }
     }

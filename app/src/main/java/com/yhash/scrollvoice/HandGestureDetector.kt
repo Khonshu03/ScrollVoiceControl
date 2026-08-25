@@ -98,14 +98,32 @@ class HandGestureDetector(
         private const val MAX_CONSECUTIVE_FRAME_FAILURES = 8
 
         private const val WRIST = 0
+        private const val THUMB_TIP = 4
         private const val INDEX_PIP = 6
         private const val INDEX_TIP = 8
+        private const val MIDDLE_MCP = 9
         private const val MIDDLE_PIP = 10
         private const val MIDDLE_TIP = 12
         private const val RING_PIP = 14
         private const val RING_TIP = 16
         private const val PINKY_PIP = 18
         private const val PINKY_TIP = 20
+
+        // "Chef's kiss" pose: all five fingertips pinched together to a
+        // point. Detected as the average fingertip-to-centroid distance,
+        // normalized by palm size (wrist-to-middle-knuckle) so it works
+        // regardless of how close your hand is to the camera. Lower =
+        // stricter pinch required; raise if it's not triggering on a
+        // genuine pinch, lower if it fires too easily.
+        private const val KISS_PINCH_RATIO = 0.35
+
+        // Pose must be held this long before it counts, so a hand merely
+        // passing through a pinch-like shape mid-gesture doesn't trigger it.
+        private const val KISS_MIN_HOLD_MS = 120L
+        private const val KISS_COOLDOWN_MS = 900L
+        // Same idea as POINTING_LOSS_GRACE_MS - tolerates a brief tracking
+        // blip without treating the pose as having ended.
+        private const val KISS_LOSS_GRACE_MS = 150L
     }
 
     private var executor: ExecutorService = Executors.newSingleThreadExecutor()
@@ -122,6 +140,13 @@ class HandGestureDetector(
     private var lastFireTime = 0L
     private var smoothedX: Float? = null
     private var smoothedY: Float? = null
+
+    // Kiss-pose (play/pause toggle) state, separate from the pointing/swipe
+    // state above since the two gestures are mutually exclusive per frame.
+    private var kissPoseStartTime = 0L
+    private var lastKissTrueTime = 0L
+    private var kissFiredThisPose = false
+    private var lastKissFireTime = 0L
 
     // Reused across frames to avoid a fresh IntArray allocation every frame -
     // the Bitmap itself is still allocated fresh each frame (see
@@ -413,12 +438,23 @@ class HandGestureDetector(
 
         if (hands.isEmpty()) {
             maybeEndSession()
+            maybeEndKissSession(now)
             postCursorUpdate(now)
             return
         }
 
         val landmarks = hands[0]
         val wrist = landmarks[WRIST]
+
+        if (isKissPose(landmarks)) {
+            handleKissPose(now)
+            // Kiss and pointing are mutually exclusive per frame - a fist-
+            // like pinch isn't also a point, so don't fall through.
+            postCursorUpdate(now)
+            return
+        } else {
+            maybeEndKissSession(now)
+        }
 
         fun extended(tipIdx: Int, pipIdx: Int): Boolean {
             val tip = landmarks[tipIdx]
@@ -493,6 +529,58 @@ class HandGestureDetector(
         lastFireTime = now
         Log.d(TAG, "Pointing swipe -> $direction (delta=$delta)")
         mainHandler.post { onSwipe(direction) }
+    }
+
+    /**
+     * "Chef's kiss" pose: all five fingertips pinched together to a point.
+     * Detected as the average fingertip-to-centroid distance, normalized by
+     * palm size (wrist-to-middle-knuckle) so it works at any distance from
+     * the camera.
+     */
+    private fun isKissPose(landmarks: List<com.google.mediapipe.tasks.components.containers.NormalizedLandmark>): Boolean {
+        val wrist = landmarks[WRIST]
+        val middleMcp = landmarks[MIDDLE_MCP]
+        val palmSize = hypot((middleMcp.x() - wrist.x()).toDouble(), (middleMcp.y() - wrist.y()).toDouble())
+        if (palmSize < 1e-4) return false
+
+        val tips = listOf(
+            landmarks[THUMB_TIP],
+            landmarks[INDEX_TIP],
+            landmarks[MIDDLE_TIP],
+            landmarks[RING_TIP],
+            landmarks[PINKY_TIP]
+        )
+        val centroidX = tips.sumOf { it.x().toDouble() } / tips.size
+        val centroidY = tips.sumOf { it.y().toDouble() } / tips.size
+        val avgDist = tips.sumOf { hypot((it.x() - centroidX), (it.y() - centroidY)) } / tips.size
+
+        return (avgDist / palmSize) < KISS_PINCH_RATIO
+    }
+
+    /** Tracks how long the kiss pose has been held and fires the toggle once per pose, not once per frame. */
+    private fun handleKissPose(now: Long) {
+        if (kissPoseStartTime == 0L) {
+            kissPoseStartTime = now
+            kissFiredThisPose = false
+        }
+        lastKissTrueTime = now
+
+        val held = now - kissPoseStartTime
+        val inCooldown = now - lastKissFireTime < KISS_COOLDOWN_MS
+        if (!kissFiredThisPose && !inCooldown && held >= KISS_MIN_HOLD_MS) {
+            kissFiredThisPose = true
+            lastKissFireTime = now
+            Log.d(TAG, "Kiss pose held ${held}ms -> play/pause toggle")
+            mainHandler.post { onSwipe("toggle") }
+        }
+    }
+
+    /** Resets the kiss-pose session once the pose has been absent for longer than the grace period. */
+    private fun maybeEndKissSession(now: Long) {
+        if (kissPoseStartTime != 0L && now - lastKissTrueTime > KISS_LOSS_GRACE_MS) {
+            kissPoseStartTime = 0L
+            kissFiredThisPose = false
+        }
     }
 
     private class SimpleLifecycleOwner : LifecycleOwner {
