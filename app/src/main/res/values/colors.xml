@@ -19,20 +19,26 @@
     <color name="purple_600">#7C3AED</color>
     <color name="purple_700">#6425D0</color>
 
-    <!-- Mode colors - match the overlay status-dot colors in OverlayService
-         (MODE_COLORS) 1:1, so the in-app chip and the on-screen dot always
-         agree on what color = which mode. -->
-    <color name="mode_voice">#2196F3</color>
-    <color name="mode_voice_dark">#1769AA</color>
-    <color name="mode_voice_light">#64B5F6</color>
+    <!-- Mode colors - adopted from the Figma reference design, and matched
+         1:1 with the overlay status-dot colors in OverlayService
+         (MODE_COLORS), so the in-app card and the on-screen dot always
+         agree on what color = which mode. Each mode is a two-hue gradient
+         (light accent -> base -> a shifted second hue) rather than a single
+         tint, e.g. voice runs pink into purple. -->
+    <color name="mode_voice_light">#F472B6</color>
+    <color name="mode_voice">#EC4899</color>
+    <color name="mode_voice_dark">#A855F7</color>
+    <color name="mode_voice_glow">#8CEC4899</color>
 
-    <color name="mode_clap">#FF9800</color>
-    <color name="mode_clap_dark">#C77700</color>
-    <color name="mode_clap_light">#FFB74D</color>
+    <color name="mode_clap_light">#818CF8</color>
+    <color name="mode_clap">#6366F1</color>
+    <color name="mode_clap_dark">#8B5CF6</color>
+    <color name="mode_clap_glow">#8C6366F1</color>
 
-    <color name="mode_camera">#009688</color>
-    <color name="mode_camera_dark">#00695C</color>
-    <color name="mode_camera_light">#4DB6AC</color>
+    <color name="mode_camera_light">#FB7185</color>
+    <color name="mode_camera">#F43F5E</color>
+    <color name="mode_camera_dark">#F97316</color>
+    <color name="mode_camera_glow">#8CF43F5E</color>
 
     <!-- Text -->
     <color name="text_primary">#F5F5F7</color>
