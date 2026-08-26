@@ -136,12 +136,14 @@
             android:layout_marginBottom="28dp">
 
             <com.yhash.scrollvoice.GlowView
-                android:layout_width="240dp"
+                android:layout_width="260dp"
                 android:layout_height="140dp"
                 android:layout_gravity="center"
                 app:glowColor="@color/purple_500"
-                app:glowBlurRadius="30dp"
-                app:glowCornerRadius="28dp" />
+                app:glowBlurRadius="16dp"
+                app:glowCornerRadius="28dp"
+                app:glowShapeWidth="180dp"
+                app:glowShapeHeight="56dp" />
 
             <Button
                 android:id="@+id/stopButton"
