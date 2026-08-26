@@ -10,57 +10,96 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:gravity="center_horizontal"
-        android:padding="28dp">
+        android:padding="24dp">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:layout_marginBottom="28dp"
-            android:fontFamily="@font/space_grotesk"
-            android:text="@string/app_name"
-            android:textColor="@color/text_muted"
-            android:textSize="13sp"
-            android:textStyle="bold"
-            android:letterSpacing="0.14" />
-
-        <!-- Status card -->
-        <LinearLayout
+        <!-- Master control card -->
+        <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:background="@drawable/card_surface"
-            android:padding="18dp"
-            android:layout_marginBottom="28dp">
+            android:layout_marginBottom="26dp">
 
-            <ImageView
-                android:id="@+id/statusDot"
-                android:layout_width="16dp"
-                android:layout_height="16dp"
-                android:layout_marginEnd="14dp"
-                android:src="@drawable/dot_off"
-                android:contentDescription="@null" />
-
-            <TextView
-                android:id="@+id/statusText"
-                android:layout_width="0dp"
+            <View
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:fontFamily="@font/space_grotesk"
-                android:text="Voice control is OFF"
-                android:textColor="@color/text_primary"
-                android:textSize="16sp"
-                android:textStyle="bold" />
+                android:minHeight="120dp"
+                android:background="@drawable/card_surface" />
 
-        </LinearLayout>
+            <!-- Ambient corner glow, tinted to the active mode at runtime -->
+            <com.yhash.scrollvoice.GlowView
+                android:id="@+id/cardGlow"
+                android:layout_width="180dp"
+                android:layout_height="120dp"
+                android:layout_gravity="end|top"
+                android:alpha="0.35"
+                app:glowColor="@color/purple_500"
+                app:glowBlurRadius="20dp"
+                app:glowCornerRadius="60dp"
+                app:glowShapeWidth="90dp"
+                app:glowShapeHeight="60dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/space_grotesk"
+                    android:text="MASTER CONTROL"
+                    android:textColor="@color/text_muted"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.16" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:fontFamily="@font/space_grotesk"
+                    android:text="@string/app_name"
+                    android:textColor="@color/text_primary"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="14dp">
+
+                    <ImageView
+                        android:id="@+id/statusDot"
+                        android:layout_width="14dp"
+                        android:layout_height="14dp"
+                        android:layout_marginEnd="10dp"
+                        android:src="@drawable/dot_off"
+                        android:contentDescription="@null" />
+
+                    <TextView
+                        android:id="@+id/statusText"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:fontFamily="@font/space_grotesk"
+                        android:text="Voice control is OFF"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="14sp" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+        </FrameLayout>
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="10dp"
             android:fontFamily="@font/space_grotesk"
-            android:text="MODE"
+            android:text="DETECTION MODE"
             android:textColor="@color/text_muted"
             android:textSize="12sp"
             android:textStyle="bold"
@@ -70,72 +109,84 @@
             android:id="@+id/modeGroup"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:weightSum="3"
-            android:layout_marginBottom="32dp">
+            android:orientation="vertical"
+            android:layout_marginBottom="30dp">
 
             <RadioButton
                 android:id="@+id/modeVoice"
-                android:layout_width="0dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginEnd="6dp"
+                android:layout_marginBottom="10dp"
                 android:button="@null"
                 android:background="@drawable/chip_bg_selector_voice"
-                android:gravity="center"
-                android:paddingTop="12dp"
-                android:paddingBottom="12dp"
+                android:gravity="center_vertical"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:paddingTop="14dp"
+                android:paddingBottom="14dp"
+                android:drawableStart="@drawable/icon_badge_voice"
+                android:drawablePadding="14dp"
                 android:fontFamily="@font/space_grotesk"
-                android:text="Voice"
+                android:text="Voice\nSpeak to scroll"
                 android:textColor="@color/chip_text_selector"
-                android:textSize="14sp"
-                android:textStyle="bold" />
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:lineSpacingExtra="2dp" />
 
             <RadioButton
                 android:id="@+id/modeClap"
-                android:layout_width="0dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginStart="3dp"
-                android:layout_marginEnd="3dp"
+                android:layout_marginBottom="10dp"
                 android:button="@null"
                 android:background="@drawable/chip_bg_selector_clap"
-                android:gravity="center"
-                android:paddingTop="12dp"
-                android:paddingBottom="12dp"
+                android:gravity="center_vertical"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:paddingTop="14dp"
+                android:paddingBottom="14dp"
+                android:drawableStart="@drawable/icon_badge_clap"
+                android:drawablePadding="14dp"
                 android:fontFamily="@font/space_grotesk"
-                android:text="Clap"
+                android:text="Clap\n1 = down · 2 = up · 3 = back"
                 android:textColor="@color/chip_text_selector"
-                android:textSize="14sp"
-                android:textStyle="bold" />
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:lineSpacingExtra="2dp" />
 
             <RadioButton
                 android:id="@+id/modeCamera"
-                android:layout_width="0dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginStart="6dp"
                 android:button="@null"
                 android:background="@drawable/chip_bg_selector_camera"
-                android:gravity="center"
-                android:paddingTop="12dp"
-                android:paddingBottom="12dp"
+                android:gravity="center_vertical"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:paddingTop="14dp"
+                android:paddingBottom="14dp"
+                android:drawableStart="@drawable/icon_badge_camera"
+                android:drawablePadding="14dp"
                 android:checked="true"
                 android:fontFamily="@font/space_grotesk"
-                android:text="Camera"
+                android:text="Camera\nWave your hand to scroll"
                 android:textColor="@color/chip_text_selector"
-                android:textSize="14sp"
-                android:textStyle="bold" />
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:lineSpacingExtra="2dp" />
 
         </RadioGroup>
 
-        <!-- Glowing Stop button: real blurred halo (GlowView) behind a pill button -->
+        <!-- Glowing Stop button: real blurred halo (GlowView) behind a pill button.
+             Both are recolored at runtime in MainActivity.kt to match whichever
+             mode is actually running. -->
         <FrameLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="28dp">
+            android:layout_marginBottom="12dp">
 
             <com.yhash.scrollvoice.GlowView
+                android:id="@+id/stopGlow"
                 android:layout_width="260dp"
                 android:layout_height="140dp"
                 android:layout_gravity="center"
