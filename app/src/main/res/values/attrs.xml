@@ -4,5 +4,7 @@
         <attr name="glowColor" format="color" />
         <attr name="glowBlurRadius" format="dimension" />
         <attr name="glowCornerRadius" format="dimension" />
+        <attr name="glowShapeWidth" format="dimension" />
+        <attr name="glowShapeHeight" format="dimension" />
     </declare-styleable>
 </resources>
