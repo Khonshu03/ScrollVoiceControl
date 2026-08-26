@@ -22,6 +22,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusDot: ImageView
     private lateinit var modeGroup: RadioGroup
     private lateinit var stopButton: Button
+    private lateinit var stopGlow: GlowView
+    private lateinit var cardGlow: GlowView
 
     private var isRunning = false
 
@@ -47,6 +49,8 @@ class MainActivity : AppCompatActivity() {
         statusDot = findViewById(R.id.statusDot)
         modeGroup = findViewById(R.id.modeGroup)
         stopButton = findViewById(R.id.stopButton)
+        stopGlow = findViewById(R.id.stopGlow)
+        cardGlow = findViewById(R.id.cardGlow)
 
         val savedMode = prefs.getString("mode", VoiceListenerService.MODE_CAMERA)
         when (savedMode) {
@@ -71,6 +75,7 @@ class MainActivity : AppCompatActivity() {
             stopButton.visibility = android.view.View.GONE
             statusText.text = "Voice control is OFF"
             statusDot.setImageResource(R.drawable.dot_off)
+            cardGlow.animate().alpha(0.15f).setDuration(300).start()
         }
     }
 
@@ -147,6 +152,21 @@ class MainActivity : AppCompatActivity() {
         }
         statusText.text = "Voice control is ON ($modeLabel mode)"
         statusDot.setImageResource(R.drawable.dot_on)
+        applyModeStyle(mode)
+    }
+
+    /** Recolors the Stop button and both glows to match whichever mode is actually running. */
+    private fun applyModeStyle(mode: String) {
+        val density = resources.displayMetrics.density
+        val palette = ModeStyle.paletteFor(this, mode)
+        stopButton.background = ModeStyle.buildStopButtonDrawable(
+            cornerRadiusPx = 28f * density,
+            glossHeightPx = (20f * density).toInt(),
+            palette = palette
+        )
+        stopGlow.glowColor = palette.base
+        cardGlow.glowColor = palette.base
+        cardGlow.animate().alpha(0.5f).setDuration(300).start()
     }
 
     private fun startVoiceService(mode: String) {

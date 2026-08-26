@@ -43,9 +43,9 @@ class OverlayService : Service() {
         private val CURSOR_COLOR = Color.parseColor("#CCFFFFFF")
 
         private val MODE_COLORS = mapOf(
-            VoiceListenerService.MODE_VOICE to Color.parseColor("#FF2196F3"),
-            VoiceListenerService.MODE_CLAP to Color.parseColor("#FFFF9800"),
-            VoiceListenerService.MODE_CAMERA to Color.parseColor("#FF009688")
+            VoiceListenerService.MODE_VOICE to Color.parseColor("#FFEC4899"),
+            VoiceListenerService.MODE_CLAP to Color.parseColor("#FF6366F1"),
+            VoiceListenerService.MODE_CAMERA to Color.parseColor("#FFF43F5E")
         )
 
         // Hand-landmark inference only yields ~10-20 position updates/sec.
