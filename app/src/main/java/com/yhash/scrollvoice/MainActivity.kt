@@ -1,17 +1,15 @@
 package com.yhash.scrollvoice
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.text.TextUtils
-import android.widget.Button
-import android.widget.ImageView
-import android.widget.RadioButton
-import android.widget.RadioGroup
-import android.widget.TextView
+import android.webkit.JavascriptInterface
+import android.webkit.WebView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -19,16 +17,13 @@ import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var statusDot: ImageView
-    private lateinit var statusText: TextView
-    private lateinit var modeGroup: RadioGroup
-    private lateinit var cardGlow: GlowView
-    private lateinit var stopGlow: GlowView
-    private lateinit var stopButton: Button
-
+    private lateinit var webView: WebView
     private val prefs by lazy { getSharedPreferences("scroll_voice_prefs", MODE_PRIVATE) }
     private var isActive = false
-    private var pendingMode: String? = null // mode we're mid-permission-flow for
+
+    // Which mode we're actively mid-permission-flow for, so the launcher
+    // callbacks below know what to resume once permission is granted.
+    private var pendingMode: String? = null
 
     private val requestMicPermissionLauncher = registerForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
@@ -56,51 +51,26 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        statusDot = findViewById(R.id.statusDot)
-        statusText = findViewById(R.id.statusText)
-        modeGroup = findViewById(R.id.modeGroup)
-        cardGlow = findViewById(R.id.cardGlow)
-        stopGlow = findViewById(R.id.stopGlow)
-        stopButton = findViewById(R.id.stopButton)
+        WebView.setWebContentsDebuggingEnabled(true)
 
-        // Restore the last-selected mode BEFORE attaching the listener below,
-        // so setting it here doesn't itself trigger a start.
-        val savedMode = prefs.getString("mode", VoiceListenerService.MODE_CAMERA) ?: VoiceListenerService.MODE_CAMERA
-        selectRadioForMode(savedMode)
-        applyModeStyling(savedMode)
-
-        modeGroup.setOnCheckedChangeListener { _, checkedId ->
-            val mode = modeForCheckedId(checkedId)
-            prefs.edit().putString("mode", mode).apply()
-            applyModeStyling(mode)
-            // Tapping a mode chip is the "start" action - engage immediately
-            // (or switch live if something's already running).
-            beginPermissionFlow(mode)
+        webView = findViewById(R.id.webView)
+        webView.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            allowFileAccess = true
+            allowContentAccess = true
+            allowFileAccessFromFileURLs = true
+            allowUniversalAccessFromFileURLs = true
         }
 
-        stopButton.setOnClickListener { stopEverything() }
+        webView.addJavascriptInterface(WebAppInterface(this), "Android")
+        webView.loadUrl("file:///android_asset/web/index.html")
     }
 
-    override fun onResume() {
-        super.onResume()
-        if (isActive && !isAccessibilityServiceEnabled()) {
-            statusText.text = "Waiting for Accessibility permission..."
-        }
-    }
-
-    private fun modeForCheckedId(checkedId: Int): String = when (checkedId) {
-        R.id.modeClap -> VoiceListenerService.MODE_CLAP
-        R.id.modeCamera -> VoiceListenerService.MODE_CAMERA
+    private fun modeForCheckedId(mode: String): String = when (mode) {
+        VoiceListenerService.MODE_CLAP -> VoiceListenerService.MODE_CLAP
+        VoiceListenerService.MODE_CAMERA -> VoiceListenerService.MODE_CAMERA
         else -> VoiceListenerService.MODE_VOICE
-    }
-
-    private fun selectRadioForMode(mode: String) {
-        val id = when (mode) {
-            VoiceListenerService.MODE_CLAP -> R.id.modeClap
-            VoiceListenerService.MODE_CAMERA -> R.id.modeCamera
-            else -> R.id.modeVoice
-        }
-        findViewById<RadioButton>(id).isChecked = true
     }
 
     private fun beginPermissionFlow(mode: String) {
@@ -127,7 +97,6 @@ class MainActivity : AppCompatActivity() {
                 Toast.LENGTH_LONG
             ).show()
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
-            statusText.text = "Waiting for overlay permission..."
             return
         }
         proceedAfterPermissions()
@@ -141,14 +110,12 @@ class MainActivity : AppCompatActivity() {
                 Toast.LENGTH_LONG
             ).show()
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            statusText.text = "Waiting for Accessibility permission..."
             return
         }
         val mode = pendingMode ?: return
         pendingMode = null
         startVoiceService(mode)
         isActive = true
-        updateActiveUi(mode)
     }
 
     private fun startVoiceService(mode: String) {
@@ -162,33 +129,6 @@ class MainActivity : AppCompatActivity() {
         stopService(Intent(this, VoiceListenerService::class.java))
         stopService(Intent(this, OverlayService::class.java))
         isActive = false
-        statusDot.setImageResource(R.drawable.dot_off)
-        statusText.text = "Voice control is OFF"
-        stopButton.visibility = android.view.View.GONE
-    }
-
-    private fun updateActiveUi(mode: String) {
-        statusDot.setImageResource(R.drawable.dot_on)
-        val modeLabel = when (mode) {
-            VoiceListenerService.MODE_CLAP -> "clap"
-            VoiceListenerService.MODE_CAMERA -> "camera"
-            else -> "voice"
-        }
-        statusText.text = "Voice control is ON ($modeLabel mode)"
-        stopButton.visibility = android.view.View.VISIBLE
-    }
-
-    private fun applyModeStyling(mode: String) {
-        val palette = ModeStyle.paletteFor(this, mode)
-        cardGlow.glowColor = palette.glow
-        stopGlow.glowColor = palette.glow
-
-        val density = resources.displayMetrics.density
-        stopButton.background = ModeStyle.buildStopButtonDrawable(
-            cornerRadiusPx = 28f * density,
-            glossHeightPx = (28f * density).toInt(),
-            palette = palette
-        )
     }
 
     private fun hasPermission(permission: String): Boolean =
@@ -206,5 +146,43 @@ class MainActivity : AppCompatActivity() {
             if (splitter.next().equals(expected, ignoreCase = true)) return true
         }
         return false
+    }
+
+    /**
+     * Bridge exposed to the web UI as `window.Android`. Important: these
+     * methods are invoked by the WebView on a background JS-bridge thread,
+     * NOT the main thread - anything touching permissions, activities, or
+     * services has to hop back to the main thread via runOnUiThread first,
+     * or it can silently misbehave or crash.
+     */
+    inner class WebAppInterface(private val context: Context) {
+
+        @JavascriptInterface
+        fun setServiceActive(active: Boolean) {
+            runOnUiThread {
+                if (active) {
+                    val mode = prefs.getString("mode", VoiceListenerService.MODE_CAMERA)
+                        ?: VoiceListenerService.MODE_CAMERA
+                    beginPermissionFlow(mode)
+                } else {
+                    stopEverything()
+                }
+            }
+        }
+
+        @JavascriptInterface
+        fun setMode(mode: String) {
+            runOnUiThread {
+                val normalized = modeForCheckedId(mode)
+                prefs.edit().putString("mode", normalized).apply()
+                // Only restart live if we're already running (permissions
+                // for this app are already granted at that point). If not
+                // active, this just remembers the choice for next start -
+                // it must NOT bypass beginPermissionFlow's checks.
+                if (isActive) {
+                    startVoiceService(normalized)
+                }
+            }
+        }
     }
 }
